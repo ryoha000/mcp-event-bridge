@@ -29,7 +29,7 @@ function redacted(logs){
   for(const value of [secret,url,'PRIVATE-PATH',caller.owner,caller.clientId,caller.grantId,GUILD_ID,'PRIVATE-ERROR','PRIVATE-CHALLENGE'])assert.equal(serialized.includes(value),false);
   for(const row of logs)assert.ok(Object.keys(row).every(k=>['kind','method','phase','status','errorCode','rpcCode','reason'].includes(k)));
 }
-test('signed synthetic and consumer subscription challenges use the same callback contract and retain exact consumer resource',async()=>{
+test('署名付き合成/コンシューマのサブスクリプションチャレンジは同一コールバック契約を使い、厳密なコンシューマresourceを保持する',async()=>{
   const f=fixture();
   const probe=createHandler(memoryStore(),f.callback);
   await probe('events/subscribe',{name:'probe.created',arguments:{probe_id:'00000000-0000-4000-8000-000000000000'},delivery:{mode:'webhook',url,secret}},caller.owner);
@@ -42,7 +42,7 @@ test('signed synthetic and consumer subscription challenges use the same callbac
   assert.ok(phases.includes('callback_verify_complete'));assert.ok(phases.includes('persistence_complete'));
   assert.equal(f.logs.filter(x=>x.phase==='request_completed').length,2);redacted(f.logs);
 });
-test('consumer failure diagnostics identify validation, callback and ambiguous persistence without private data',async()=>{
+test('コンシューマ失敗診断はプライベートデータなしに検証・コールバック・曖昧な永続化を識別する',async()=>{
   const cases=[
     {phase:'validate_scope',caller:{...caller,scopes:['discord:reply']},rpcCode:-32603},
     {phase:'validate_arguments',args:{...args(),arguments:{guild_id:'wrong'}},rpcCode:-32602},
@@ -63,13 +63,13 @@ test('consumer failure diagnostics identify validation, callback and ambiguous p
     else assert.equal((await f.store.sourceStatus(caller.owner,{source:'discord',name:'discord.mention.created',tenantId:GUILD_ID,clientId:caller.clientId,grantId:caller.grantId,resource})).subscriptions.total,0);
   }
 });
-test('diagnostics discard arbitrary fields and exception text; sink failure cannot fail a valid subscription',async()=>{
+test('診断は任意フィールドと例外テキストを捨てる。シンク失敗で有効なサブスクリプションは失敗しない',async()=>{
   const rows=[];eventDiagnostic('subscription','PRIVATE-ERROR','PRIVATE-ERROR',{url,secret,body:'PRIVATE-CHALLENGE',error:{code:'PRIVATE-ERROR',message:url},status:999},text=>rows.push(JSON.parse(text)));
   assert.deepEqual(rows,[{kind:'discord_subscription_diagnostic',method:'unknown',phase:'unknown',rpcCode:-32603}]);redacted(rows);
   const f=fixture({sink:()=>{throw Error('PRIVATE-ERROR');}});await f.handler('events/subscribe',args(),caller.owner,caller);assert.equal(f.calls.length,1);
 });
 
-test('standard MCP request metadata is ignored without weakening Discord filters or exposing it',async()=>{
+test('標準MCPリクエストメタデータはDiscordフィルタを弱めず・露出せずに無視される',async()=>{
   const f=fixture();const metadata={progressToken:'PRIVATE-ERROR',nested:{token:secret,context:'PRIVATE-CHALLENGE'}};
   const subscribed=await f.handler('events/subscribe',{...args(),_meta:metadata},caller.owner,caller);assert.ok(subscribed.id);
   await f.handler('events/unsubscribe',{name:args().name,arguments:args().arguments,delivery:{mode:'webhook',url},_meta:metadata},caller.owner,caller);
@@ -80,7 +80,7 @@ test('standard MCP request metadata is ignored without weakening Discord filters
   assert.equal(f.calls.length,1);redacted(f.logs);
 });
 
-test('callback diagnostic wrappers preserve pinned HTTPS options and keep body, address and destination out of logs',async()=>{
+test('コールバック診断ラッパーは固定HTTPSオプションを維持し、本文・アドレス・宛先をログに出さない',async()=>{
   const logs=[];let destination;
   const transport=createDiscordCallbackTransport({resolve:async()=>['8.8.8.8'],diagnosticSink:text=>logs.push(JSON.parse(text)),send:(options,listener)=>{
     destination=options;const req=new EventEmitter();req.destroy=()=>{};
@@ -91,7 +91,7 @@ test('callback diagnostic wrappers preserve pinned HTTPS options and keep body, 
   let pinned;destination.lookup('ignored',{},(_error,address,family)=>{pinned={address,family};});assert.deepEqual(pinned,{address:'8.8.8.8',family:4});
   assert.ok(logs.some(x=>x.phase==='callback_tls_connected'));redacted(logs);assert.equal(JSON.stringify(logs).includes('8.8.8.8'),false);
 });
-test('DNS and connection failure codes are bounded and public-address rejection still prevents connection',async()=>{
+test('DNS/接続失敗コードは上限付きで、公開アドレス拒否は接続を阻止する',async()=>{
   for(const code of ['ENOTFOUND','ECONNREFUSED']){
     const logs=[];const error=Object.assign(Error(url+' '+secret),{code});
     const transport=createDiscordCallbackTransport({diagnosticSink:text=>logs.push(JSON.parse(text)),resolve:async()=>{if(code==='ENOTFOUND')throw error;return ['8.8.8.8'];},send:()=>{const req=new EventEmitter();req.destroy=()=>{};req.end=()=>req.emit('error',error);return req;}});

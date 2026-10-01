@@ -26,8 +26,8 @@ export async function createProductionAdapters(env){
  const receiverRequest=createReceiverRequest({events,store:eventStore,transport:callbackTransport,authorizeSubscription});
  return {...base,handlerFactory:probe=>createCombinedHandler(probe,events,{consumerResource}),...(env.DISCORD_RECEIVER_ENABLE==='true'?{ingestEvent:events.ingestNormalized,receiverRequest}:{})};
 }
-// One authenticated idle request advances delivery and polls the reply queue.
-// Combined claim requires both receiver scopes before any callback I/O.
+// 認証済みアイドルリクエスト1回で配送を進め、返信キューをポーリングする。
+// 統合claimは、コールバックI/Oの前にレシーバーの両スコープを要求する。
 export function createReceiverRequest({events,store,transport,authorizeSubscription}){
  return async(principal,action,p)=>{
   if(action==='claim'){
@@ -41,7 +41,7 @@ export function createReceiverRequest({events,store,transport,authorizeSubscript
  };
 }
 
-// Dedicated issuer/resource keeps dot discovery free of probe/receiver scopes.
+// 専用のissuer/resourceにより、dot側ディスカバリにプローブ/レシーバーのスコープを混ぜない。
 export function routeConsumerOAuth(main,consumer){
  const selected=req=>{const p=new URL(req.url,'https://routing.invalid').pathname;return p==='/mcp/discord'||p.startsWith('/discord/')||p==='/.well-known/oauth-protected-resource/mcp/discord'||p==='/.well-known/oauth-authorization-server/discord'||p==='/.well-known/openid-configuration/discord'?consumer:main;};
  return {productionReady:true,discordConsumerEnabled:true,challenge:main.challenge,challengeForRequest:req=>selected(req).challenge,authenticate:req=>selected(req).authenticate(req),handleHttp:(req,res)=>selected(req).handleHttp(req,res)};

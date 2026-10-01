@@ -1,5 +1,5 @@
 [Unit]
-Description=Discord mention MCP service
+Description=DiscordメンションMCPサービス
 Requires=discord-mcp-secrets.service
 After=network-online.target discord-mcp-secrets.service
 Wants=network-online.target

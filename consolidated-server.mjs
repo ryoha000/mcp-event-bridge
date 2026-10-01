@@ -11,7 +11,7 @@ import {validateDiscordReceiver,receiverDiagnostic} from './lib/adapters/discord
 import {createDiscordCallbackTransport} from './lib/events/callback-transport.mjs';
 import {createConsolidatedRuntime} from './consolidated-runtime.mjs';
 
-// Local source preparation only. No credentials/resources/ingress are created.
+// ローカルのソース準備のみ。認証情報/リソース/イングレスは一切作成しない。
 export async function prepareConsolidatedServer(env,dependencies={}){
  if(env.CONSOLIDATED_DISCORD_ENABLE!=='true'||env.GOOGLE_APPLICATION_CREDENTIALS||env.STORAGE_EMULATOR_HOST)throw Error('Consolidated deployment approval/configuration required');
  const publicOrigin=new URL(env.CONSOLIDATED_ORIGIN??'');

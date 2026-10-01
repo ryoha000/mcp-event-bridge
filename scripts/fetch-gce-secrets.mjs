@@ -11,9 +11,10 @@ const metadata='http://metadata.google.internal/computeMetadata/v1/instance/serv
 async function bounded(response,max=65536){if(!response.ok)throw Error();let size=0;const chunks=[];for await(const chunk of response.body??[]){size+=chunk.length;if(size>max)throw Error();chunks.push(Buffer.from(chunk));}return Buffer.concat(chunks).toString('utf8');}
 function authValid(bytes){const data=JSON.parse(bytes.toString('utf8'));if(!Array.isArray(data.cookieKeys)||!data.cookieKeys.length||data.cookieKeys.length>2||data.cookieKeys.some(k=>typeof k!=='string'||Buffer.byteLength(k)<32||Buffer.byteLength(k)>256)||!Array.isArray(data.jwks?.keys)||!data.jwks.keys.length||data.jwks.keys.length>2)throw Error();for(const jwk of data.jwks.keys){const key=createPrivateKey({key:jwk,format:'jwk'});if(key.asymmetricKeyType!=='rsa'||key.asymmetricKeyDetails.modulusLength<2048)throw Error();}}
 async function writePrivate(name,bytes){const stat=await lstat(root);if(!stat.isDirectory()||stat.isSymbolicLink()||stat.uid!==0||(stat.mode&0o777)!==0o700)throw Error();const temp=root+'/'+name+'.'+randomUUID()+'.tmp';await writeFile(temp,bytes,{flag:'wx',mode:0o600});await rename(temp,root+'/'+name);}
-// Deployment-only entrypoint. Not invoked by local builds/tests. Production uses
-// VM metadata identity, never PC credential files, gcloud token output or env
-// secrets. All values stay in memory/root-only /run files; diagnostics are fixed.
+// デプロイ専用エントリポイント。ローカルのビルド/テストからは呼ばれない。
+// 本番ではVMメタデータIDを使い、PCの認証情報ファイル、gcloudトークン出力、
+// 環境変数シークレットは一切使わない。値はすべてメモリ/root限定の /run
+// ファイルに留め、診断は固定語彙のみ。
 export async function fetchGceSecrets({fetchImpl=fetch,writeSecret=writePrivate}={}){
  try{
   const getMeta=async name=>{const r=await fetchImpl(metadata+name,{headers:{'Metadata-Flavor':'Google'},redirect:'error',signal:AbortSignal.timeout(8000)});if(r.headers.get('metadata-flavor')!=='Google')throw Error();return bounded(r);};
@@ -26,7 +27,7 @@ export async function fetchGceSecrets({fetchImpl=fetch,writeSecret=writePrivate}
   }
   const bot=await secret(process.env.MCP_DISCORD_BOT_SECRET??'discord-mention-bot-token',process.env.MCP_DISCORD_BOT_SECRET_VERSION??'2'),auth=await secret(process.env.MCP_AUTH_SECRET??'discord-consolidated-auth',process.env.MCP_AUTH_SECRET_VERSION??'1');
   const token=bot.toString('utf8').trim();if(!token||token.length>4096||/\s/.test(token))throw Error();authValid(auth);
-  // Validate the complete pinned pair before publishing either runtime file.
+  // 固定した2つのペア全体を検証してから、ランタイムファイルを公開する。
   await writeSecret('bot-token',bot);await writeSecret('auth.json',auth);
   return {loaded:true,pinnedVersionsVerified:true};
  }catch{throw Error('VMの秘密情報を安全に読み込めませんでした。秘密値は表示していません');}

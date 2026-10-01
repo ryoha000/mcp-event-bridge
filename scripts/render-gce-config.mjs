@@ -9,8 +9,8 @@ export function validateGceConfig({host,googleClientId,channelIds=[]}){
  return {host,googleClientId,channelIds};
 }
 export function renderGceTemplate(text,settings){const s=validateGceConfig(settings);const rendered=text.replaceAll('@@HOST@@',s.host).replaceAll('@@EXISTING_GOOGLE_WEB_CLIENT_ID@@',s.googleClientId).replaceAll('@@APPROVED_CHANNEL_IDS_JSON@@',JSON.stringify(s.channelIds));if(rendered.includes('@@'))throw Error('未確定の設定があります');return rendered;}
-// Local rendering only. Exact host choice must be supplied; never chooses a
-// domain, signs up for DNS, writes IAM, launches services or fetches credentials.
+// ローカルでのレンダリングのみ。ホスト名は正確に指定する必要がある。
+// ドメイン選択、DNS登録、IAM書き込み、サービス起動、認証情報取得は行わない。
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){
  try{
   if(process.argv.length!==3)throw Error();const settings=validateGceConfig(JSON.parse(await readFile(process.argv[2],'utf8'))),directory=new URL('../deployment/gce/',import.meta.url),out=new URL('rendered/',directory);await mkdir(out,{recursive:true});

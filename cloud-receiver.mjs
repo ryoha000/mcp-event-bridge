@@ -12,8 +12,9 @@ import {discordRetention} from './lib/adapters/discord-retention.mjs';
 import {validateDiscordReceiver,receiverDiagnostic} from './lib/adapters/discord-preflight.mjs';
 
 const origin='https://synthetic-fixture.run.app';
-// Importing is offline. Actual startup needs approved image/config, mounted bot
-// secret, scoped runtime IAM and a live bridge delegation. No OAuth/DPAPI file.
+// インポートはオフライン処理。実際の起動には承認済みイメージ/設定、マウント済み
+// botシークレット、限定スコープのランタイムIAM、有効なブリッジ委任が必要。
+// OAuth/DPAPIファイルは使わない。
 export async function startCloudReceiver(env,dependencies={}){
  if(env.CLOUD_DISCORD_RECEIVER_ENABLE!=='true'||env.BRIDGE_ORIGIN!==origin||!env.DISCORD_RECEIVER_STATE_BUCKET||env.GOOGLE_APPLICATION_CREDENTIALS||env.STORAGE_EMULATOR_HOST)throw Error('Approved hosted receiver configuration required');
  const channels=readDiscordChannels(env);

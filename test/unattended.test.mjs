@@ -21,7 +21,7 @@ function backend(){const data=new Map();return {durable:true,read:async k=>struc
 function event(at,seq=0){const id=String((BigInt(at-1420070400000)<<22n)+BigInt(seq));return createDiscordAdapter({channelIds:[CHANNEL]}).normalize({op:0,t:'MESSAGE_CREATE',d:{id,channel_id:CHANNEL,guild_id:GUILD_ID,author:{id:'100000000000002300'},type:0,mentions:[{id:BOT_ID}],content:'<@'+BOT_ID+'> fake mention',timestamp:new Date(at).toISOString()}});}
 const subscription=at=>({id:'sub',clientId:'fake-client',grantId:'fake-grant',name:'discord.mention.created',tenantId:GUILD_ID,url:'https://callback.example/',secret:'FAKE-LOCAL-ONLY',expires:at+90*86400000});
 
-test('unattended policy isolates roles, preserves probe/mixed grants and caps the refresh family at 90 days',()=>{
+test('無人ポリシーはロールを分離し、プローブ/混在許可を維持し、リフレッシュファミリーを90日に制限する',()=>{
  const ttl=discordLifetime({resource,discordUnattendedEnabled:true}),now=Math.floor(Date.now()/1000);
  assert.equal(ttl.Grant(null,{resources:{[resource]:'discord:read discord:reply'}}),DISCORD_GRANT_SECONDS);
  assert.equal(ttl.Grant(null,{resources:{[resource]:'discord:ingest discord:receive-replies'}}),DISCORD_GRANT_SECONDS);
@@ -31,7 +31,7 @@ test('unattended policy isolates roles, preserves probe/mixed grants and caps th
  assert.equal(ttl.RefreshToken(null,{scope:'probe',iiat:now}),3600);
 });
 
-test('90 days of two rotating client families stay bounded, retain spent-token replay and preserve legacy state',async()=>{
+test('90日間の2つのローテーティングクライアントファミリーは上限内に保たれ、使用済みトークンリプレイを保持し、レガシー状態を維持する',async()=>{
  let at=100000;const b=backend(),A=createOidcAdapter(b,{now:()=>at,compactRefresh:true}),r=new A('RefreshToken'),g=new A('Grant');
  await g.upsert('legacy-probe',{exp:at+3600,resources:{[resource]:'probe'}},3600);
  for(const role of ['pc','dot'])await g.upsert(role,{kind:'Grant',clientId:role,accountId:owner,exp:at+90*86400},90*86400);
@@ -52,7 +52,7 @@ test('90 days of two rotating client families stay bounded, retain spent-token r
  at+=90*86400+1;await g.upsert('cleanup',{kind:'Grant'},10);assert.equal((await b.read('oauth-state:v1')).revoked.pc,undefined);
 });
 
-test('real provider rotates refresh tokens, revokes replayed family, and leaves the separate probe grant intact',async t=>{
+test('実プロバイダはリフレッシュトークンをローテートし、再生されたファミリーを失効させ、独立したプローブ許可を残す',async t=>{
  const b=backend();await b.update('google-owner:v1',()=>({value:{sub:'123'}}));
  const config={origin:'https://probe.example',resource,googleClientId:'123-fixture.apps.googleusercontent.com',redirects:['http://127.0.0.1:8766/callback'],cookieKeys:['FAKE-LOCAL-ONLY-COOKIE-KEY-100000000000000100'],jwks:{keys:[{...generateKeyPairSync('rsa',{modulusLength:2048}).privateKey.export({format:'jwk'}),use:'sig',alg:'RS256',kid:'fake'}]},discordEnabled:true,discordReceiverEnabled:true,discordUnattendedEnabled:true};
  const configuration=providerConfiguration(config,b);configuration.clients=[{client_id:'fake-pc',redirect_uris:config.redirects,token_endpoint_auth_method:'none',grant_types:['authorization_code','refresh_token'],response_types:['code']}];
@@ -75,7 +75,7 @@ test('real provider rotates refresh tokens, revokes replayed family, and leaves 
  assert.ok(await provider.Grant.find(probeId));
 });
 
-test('refresh is single-flight; lost response persists a fail-closed marker across restart',async()=>{
+test('リフレッシュはsingle-flight。失われた応答は再起動を越えてフェイルクローズ印を残す',async()=>{
  let saved={origin:'https://bridge.example',clientId:'fake',accessToken:'FAKE',refreshToken:'FAKE-R',expiresAt:1},calls=0;
  const options={origin:saved.origin,readCredential:async()=>JSON.stringify(saved),writeCredential:async s=>{saved=JSON.parse(s);},now:()=>100000};
  const get=createBridgeCredential({...options,fetchImpl:async()=>{calls++;await new Promise(r=>setImmediate(r));return new Response(JSON.stringify({access_token:'FAKE-NEW',refresh_token:'FAKE-ROTATED',expires_in:900}));}});
@@ -84,7 +84,7 @@ test('refresh is single-flight; lost response persists a fail-closed marker acro
  const restarted=createBridgeCredential({...options,fetchImpl:async()=>{calls++;throw Error('must not call');}});const before=calls;await assert.rejects(restarted());assert.equal(calls,before);
 });
 
-test('rolling retention frees acknowledged events, deduplicates retired IDs and never drops pending or unknown work',async()=>{
+test('ローリング保持はACK済みイベントを解放し、退避IDを重複排除し、保留中やunknownの作業を決して捨てない',async()=>{
  let at=Date.parse('2026-10-01T00:00:00Z');const born=at,b=backend(),store=createEventStore({backend:b,now:()=>at,maxEvents:3,retention:discordRetention});
  await store.subscribe(owner,subscription(at));const [a,p,u]=[0,1,2].map(i=>event(born,i));for(const e of [a,p,u])await store.ingest(owner,e);
  await store.settleDelivery(owner,await store.claimDelivery(owner),200);
@@ -95,7 +95,7 @@ test('rolling retention frees acknowledged events, deduplicates retired IDs and 
  await assert.rejects(store.ingest(owner,{...a,timestamp:new Date(at).toISOString()}),e=>e.code==='EVENT_EXPIRED');assert.ok(await store.getEvent(owner,p.eventId));
 });
 
-test('expired subscription pauses existing work and admission until refresh; no successful zero-fanout acknowledgement',async()=>{
+test('期限切れサブスクリプションは更新まで既存作業と受理を一時停止。ゼロファンアウトの成功ACKはない',async()=>{
  let at=Date.parse('2026-10-01T00:00:00Z');const store=createEventStore({backend:backend(),now:()=>at,retention:discordRetention,requireLiveSubscription:true});
  const e=event(at);await assert.rejects(store.ingest(owner,e),x=>x.code==='EVENT_SUBSCRIPTION_PAUSED');assert.equal((await store.status(owner)).events,0);
  const sub={...subscription(at),expires:at+1000};await store.subscribe(owner,sub);await store.ingest(owner,e);at+=1001;
@@ -103,7 +103,7 @@ test('expired subscription pauses existing work and admission until refresh; no 
  await store.subscribe(owner,{...sub,expires:at+86400000});assert.equal((await store.claimDelivery(owner)).eventId,e.eventId);
 });
 
-test('quiet-period maintenance uses an eight-hour subscription cap, idempotent refresh and grant deadline',async()=>{
+test('静穏期メンテナンスは8時間のサブスクリプション上限・冪等更新・許可期限を使う',async()=>{
  const store=createEventStore({backend:backend()});const service=createEventService({store,adapters:[createDiscordAdapter({channelIds:[CHANNEL]})],subscriptionTtlMs:8*3600000,transport:async(_url,request)=>new Response(JSON.stringify({challenge:JSON.parse(request.body).challenge}))});
  const principal={owner,clientId:'fake-dot',grantId:'fake-grant',grantExpiresAt:Date.now()+90*86400000,scopes:['discord:read','discord:reply']};
  const p={name:'discord.mention.created',arguments:{guild_id:GUILD_ID},delivery:{mode:'webhook',url:'https://callback.example/',secret:'whsec_'+Buffer.alloc(32,1).toString('base64')}};
@@ -112,13 +112,13 @@ test('quiet-period maintenance uses an eight-hour subscription cap, idempotent r
  const ending=await service.handle('events/subscribe',p,{...principal,grantExpiresAt:Date.now()+60000});assert.ok(Date.parse(ending.refreshBefore)<=Date.now()+60000);
 });
 
-test('PC uplink retains mentions after repeated auth, capacity and storage errors until cloud acknowledgement',async()=>{
+test('PCアップリンクはクラウドACKまで、認証・容量・ストレージの反復エラー後もメンションを保持する',async()=>{
  let at=Date.parse('2026-10-01T00:00:00Z');const store=createEventStore({backend:backend(),now:()=>at,retryUntilAcknowledged:true});await store.subscribe(owner,subscription(at));await store.ingest(owner,event(at));
  for(let n=0;n<12;n++){assert.equal((await forwardNext({store,owner,forwardEnvelope:async()=>({status:n%2?403:503})})).acknowledged,false);at+=300001;}
  assert.equal((await store.status(owner)).deliveries[0].status,'pending');assert.equal((await forwardNext({store,owner,forwardEnvelope:async()=>({status:200})})).acknowledged,true);
 });
 
-test('Discord 5xx remains uncertain across retries; bounded local receipt ledger rejects expired replies',async()=>{
+test('Discord 5xxはリトライ間で不確実のまま。上限付きローカル受領台帳は期限切れ返信を拒否する',async()=>{
  const at=Date.parse('2026-10-01T00:00:00Z'),b=backend();let calls=0;
  const adapter=createDiscordAdapter({channelIds:[CHANNEL],sendMessage:createDiscordRest({token:'FAKE',fetchImpl:async()=>{calls++;return new Response('{}',{status:500});}})});
  const command={event:event(at),content:'fake reply',requestId:'fake-request'},execute=createReceiverReplyExecutor({backend:b,adapter,retention:discordRetention,now:()=>at});
@@ -126,7 +126,7 @@ test('Discord 5xx remains uncertain across retries; bounded local receipt ledger
  const expired=createReceiverReplyExecutor({backend:b,adapter,retention:discordRetention,now:()=>at+25*3600000});assert.equal((await expired({...command,event:event(at,1)})).status,'rejected');assert.equal(calls,1);
 });
 
-test('HTTP capacity and storage errors are retryable 503 rather than terminal authorization denial',async t=>{
+test('HTTP容量・ストレージエラーは終局的な認可拒否ではなくリトライ可能な503',async t=>{
  const auth={challenge:'Bearer realm="test"',handleHttp:async()=>false,authenticate:async()=>({owner})};
  const server=createServer(createRequestListener({auth,store:memoryStore(),ingestEvent:async()=>{throw Object.assign(Error('fake'),{code:'EVENT_CAPACITY'});}}));await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>server.close(r)));
  const r=await fetch('http://127.0.0.1:'+server.address().port+'/ingest/discord',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});assert.equal(r.status,503);

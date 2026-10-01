@@ -15,7 +15,7 @@ const roles=['discord:ingest','discord:receive-replies'];
 function memory(){const data=new Map();return {durable:true,read:async k=>structuredClone(data.get(k)??null),update:async(k,f)=>{const n=f(structuredClone(data.get(k)??null));if(Object.hasOwn(n,'value'))data.set(k,structuredClone(n.value));return n.result;}};}
 const delegation=()=>({version:1,enabled:true,owner:'google:owner',subject,email,audience:origin,scopes:roles,approvedAt:at-1000,expiresAt:at+86400000});
 const claims=()=>({iss:'https://accounts.google.com',aud:origin,sub:subject,email,email_verified:true,iat:Math.floor(at/1000),exp:Math.floor(at/1000)+3600});
-test('workload bridge needs live exact delegation, verified identity and receiver-only route',async()=>{
+test('ワークロードブリッジは有効で厳密な委任・検証済みID・レシーバー専用経路を要求する',async()=>{
  const b=memory();await b.update('google-owner:v1',()=>({value:{sub:'owner'}}));let p=claims(),calls=0;
  const base={challenge:'Bearer fixture',authenticate:async()=>null,handleHttp:async()=>false};const auth=createWorkloadReceiverAuth({base,backend:b,origin,now:()=>at,verifyIdentity:async()=>{calls++;return p;}});const req=path=>({url:path,headers:{authorization:'Bearer FAKE-SIGNED-FIXTURE'}});
  assert.equal(await auth.authenticate(req('/ingest/discord')),null);assert.equal(calls,0);
@@ -24,13 +24,13 @@ test('workload bridge needs live exact delegation, verified identity and receive
  for(const patch of [{aud:origin+'/other'},{sub:'987654321'},{email:'other@example-project.iam.gserviceaccount.com'},{email_verified:false},{iss:'https://evil.example'},{exp:at/1000-1},{iat:at/1000+100}]){p={...claims(),...patch};assert.equal(await auth.authenticate(req('/ingest/discord')),null);}p=claims();
  for(const patch of [{enabled:false},{owner:'google:other'},{expiresAt:at},{expiresAt:at+91*86400000},{scopes:[...roles,'probe']}]){await b.update('workload-receiver:v1',()=>({value:{...delegation(),...patch}}));assert.equal(await auth.authenticate(req('/ingest/discord')),null);}
 });
-test('workload credential uses injected metadata identity with single-flight and short cache, never a file',async()=>{
+test('ワークロード認証情報は注入されたメタデータIDをsingle-flight+短期キャッシュで使い、ファイルは使わない',async()=>{
  let now=at,calls=0;const token=()=>['fixture',Buffer.from(JSON.stringify({aud:origin,exp:Math.floor(now/1000)+3600})).toString('base64url'),'signature'].join('.');const obtain=createWorkloadCredential({origin,now:()=>now,fetchIdentity:async()=>{calls++;return token();}});
  const issued=await Promise.all([obtain(),obtain(),obtain()]);assert.equal(calls,1);assert.equal(new Set(issued).size,1);await obtain();assert.equal(calls,1);now+=300001;await obtain();assert.equal(calls,2);
  await assert.rejects(createWorkloadCredential({origin,now:()=>now,fetchIdentity:async()=>token().replace(token().split('.')[1],Buffer.from(JSON.stringify({aud:'https://other.example',exp:now/1000+3600})).toString('base64url'))})());
 });
 class Storage{objects=new Map();generation=0;bucket(name){assert.equal(name,'private-fixture-state');const s=this;return {file(key,o={}){assert.match(key,/^discord-receiver\/v1\/[a-f0-9]{64}\.json$/);return {getMetadata:async()=>{const v=s.objects.get(key);if(!v)throw Object.assign(Error(),{code:404});return [{generation:v.g,size:String(v.bytes.length)}];},download:async()=>{const v=s.objects.get(key);if(!v||v.g!==o.generation)throw Object.assign(Error(),{code:404});return [v.bytes];},save:async(bytes,opts)=>{const v=s.objects.get(key);if(opts.preconditionOpts.ifGenerationMatch!==(v?.g??0))throw Object.assign(Error(),{code:412});s.objects.set(key,{g:String(++s.generation),bytes:Buffer.from(bytes)});}};}};}}
-test('external CAS state survives new host, rejects competing claims and never resends an uncertain send',async()=>{
+test('外部CAS状態は新ホストでも残り、競合クレームを拒否し、不確かな送信を再送しない',async()=>{
  const storage=new Storage(),a=createCloudReceiverState({bucketName:'private-fixture-state',storage}),b=createCloudReceiverState({bucketName:'private-fixture-state',storage});
  await a.update('reply-claim',old=>({value:{status:'unknown',nonce:'fixture'},result:true}));assert.deepEqual(await b.read('reply-claim'),{status:'unknown',nonce:'fixture'});
  const won=await Promise.all([a.update('lease',old=>old?{result:false}:{value:{holder:'A'},result:true}),b.update('lease',old=>old?{result:false}:{value:{holder:'B'},result:true})]);assert.equal(won.filter(Boolean).length,1);
@@ -40,18 +40,18 @@ test('external CAS state survives new host, rejects competing claims and never r
  assert.equal((await createReceiverReplyExecutor({backend:a,adapter,now:()=>at})(command)).status,'unknown');
  assert.equal((await createReceiverReplyExecutor({backend:b,adapter,now:()=>at})(command)).status,'unknown');assert.equal(sends,1);
 });
-test('hosted startup is opt-in, uses only mounted fake bot input, durable injected state and disabled replies',async()=>{
+test('ホスト型起動はオプトイン。マウント済みフェイクbot入力・注入された永続状態のみ使い、返信は無効',async()=>{
  let reads=0;const b=memory(),timers={setTimeout:()=>1,clearTimeout:()=>{}};const config={CLOUD_DISCORD_RECEIVER_ENABLE:'true',BRIDGE_ORIGIN:origin,DISCORD_RECEIVER_STATE_BUCKET:'private-fixture-state',DISCORD_CHANNEL_IDS:'["100000000000000600"]'};const deps={backend:b,readSecret:async path=>{assert.equal(path,'/var/run/secrets/discord-bot/token');reads++;return 'FAKE-BOT-NOT-A-REAL-CREDENTIAL';},gatewayFactory:()=>({start:async()=>{},stop:()=>{}}),getAccessToken:async()=>'FAKE',bridgeRequest:async()=>({command:null}),forwardEnvelope:async()=>({status:200}),timers};
  await assert.rejects(startCloudReceiver({...config,CLOUD_DISCORD_RECEIVER_ENABLE:'false'},deps));assert.equal(reads,0);
  const r=await startCloudReceiver(config,{...deps,validateDiscord:async()=>({botMatches:true}),diagnosticSink:()=>{}});await new Promise(done=>setImmediate(done));await r.shutdown();assert.equal(reads,1);assert.equal((await r.store.status('cloud-discord-receiver')).events,0);
 });
-test('Gateway release allows restart immediately and stale stopped host cannot remove successor lease',async()=>{
+test('Gatewayのリリースで即再起動でき、停止済みの古いホストは後続リースを削除できない',async()=>{
  const b=memory(),timers={setTimeout:()=>1,clearTimeout:()=>{}};class Socket{addEventListener(){}close(){}}const create=()=>createDiscordGateway({token:'FAKE',backend:b,sessionKey:'lease',onDispatch:async()=>{},WebSocketClass:Socket,timers,now:()=>at});const first=create(),second=create();await first.start();await assert.rejects(second.start());await first.release();await second.start();assert.equal(await first.release(),false);assert.notEqual((await b.read('lease')).holder,null);await second.release();
 });
 
 function deferred(){let resolve;const promise=new Promise(yes=>{resolve=yes;});return {promise,resolve};}
 
-test('shutdown holds the receiver lease until delayed claim returns and starts no Discord send afterward',async()=>{
+test('シャットダウンは遅延クレームの返却までレシーバーリースを保持し、その後Discord送信を開始しない',async()=>{
  const b=memory(),entered=deferred(),reply=deferred(),timers={setTimeout:()=>1,clearTimeout:()=>{}};
  let sends=0,releases=0,requestId;
  const adapter={validate:e=>e,reply:async()=>{sends++;return {ok:true,messageId:'100000000000002400'};}};
@@ -65,7 +65,7 @@ test('shutdown holds the receiver lease until delayed claim returns and starts n
  assert.equal((await b.read('receiver-poll:v1')).requestId,requestId);
 });
 
-test('shutdown waits for an already-started Discord send and its durable receipt before releasing lease',async()=>{
+test('シャットダウンは開始済みDiscord送信とその永続受領を待ってからリースを解放する',async()=>{
  const b=memory(),entered=deferred(),sent=deferred(),timers={setTimeout:()=>1,clearTimeout:()=>{}},order=[];
  let sends=0,releases=0;
  const adapter={validate:e=>e,reply:async()=>{sends++;order.push('send-start');entered.resolve();const receipt=await sent.promise;order.push('send-finish');return receipt;}};
@@ -83,7 +83,7 @@ test('shutdown waits for an already-started Discord send and its durable receipt
  assert.equal((await b.read('receiver-poll:v1')).requestId,null);
 });
 
-test('cloud byte-capacity pressure retains the dispatch and advances Gateway checkpoint only after durable recovery',async()=>{
+test('クラウドのバイト容量圧力ではディスパッチを保持し、永続回復後にのみGatewayチェックポイントを進める',async()=>{
  const durable=memory(),tasks=new Map(),sockets=[],notices=[];let timerId=0,failures=0,fatals=0,gateway;
  const timers={setTimeout:(fn,delay)=>{tasks.set(++timerId,{fn,delay});return timerId;},clearTimeout:id=>tasks.delete(id)};
  const backend={durable:true,read:durable.read,update:async(key,mutate)=>durable.update(key,old=>{

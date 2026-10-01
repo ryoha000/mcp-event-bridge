@@ -1,16 +1,16 @@
 # MCP Event Bridge
 
-A durable MCP Events bridge with a synthetic probe and a Discord mention adapter. The current continuous Discord host uses one Linux process, SQLite, systemd and an HTTPS reverse proxy. A request-based, scale-to-zero service does not keep a Discord Gateway connection alive.
+合成プローブと Discord メンションアダプタを備えた、耐久性のある MCP Events ブリッジ。現在の常駐 Discord ホストは、Linux プロセス 1 つ・SQLite・systemd・HTTPS リバースプロキシで構成される。リクエスト駆動のスケールトゥーゼロなサービスでは Discord Gateway 接続を維持できない。
 
-`Discord Gateway → source adapter → versioned event envelope → durable outbox → signed MCP Events callback`
+`Discord Gateway → ソースアダプタ → バージョン付きイベントエンベロープ → 永続アウトボックス → 署名付き MCP Events コールバック`
 
-The consumer can use `discord_read_event`, `discord_reply_to_event` and `discord_status` through `/mcp/discord`. OAuth scopes separate read and reply access. Replies derive their destination from the stored originating mention; callers cannot choose another channel. Direct human mentions are accepted only in the configured guild. DMs, bot messages, message history and attachments are excluded. Mention text is untrusted input, and an automated responder should use only that event's context.
+コンシューマは `/mcp/discord` を通じて `discord_read_event`、`discord_reply_to_event`、`discord_status` を利用できる。OAuth スコープは read と reply のアクセスを分離する。返信の宛先は保存された起点メンションから導出され、呼び出し側が別チャンネルを選ぶことはできない。人間による直接メンションは設定済みギルド内でのみ受理される。DM、bot のメッセージ、メッセージ履歴、添付は除外される。メンション本文は信頼できない入力であり、自動応答器はそのイベントのコンテキストのみを使うべきである。
 
-SQLite persists events, delivery attempts, subscriptions, OAuth grants, reply receipts and Gateway checkpoints. Event IDs and reply receipts deduplicate retries. An ambiguous Discord send is retained as `unknown` instead of automatically sending again. The Discord adapter also issues a bounded, independent 👀 reaction. Inline callback payloads carry the immutable mention envelope to avoid an extra read request. Other sources can implement the same normalize/validate/reply adapter contract in `lib/adapters/` and use the shared `lib/events/` components.
+SQLite はイベント・配送試行・サブスクリプション・OAuth 許可・返信受領・Gateway チェックポイントを永続化する。イベント ID と返信受領はリトライを重複排除する。曖昧な Discord 送信は自動再送せず `unknown` として保持される。Discord アダプタは上限付きの独立した 👀 リアクションも発行する。インラインコールバックペイロードは不変のメンションエンベロープを運び、追加の読み取り要求を不要にする。他のソースは `lib/adapters/` の normalize/validate/reply アダプタ契約を実装し、共有の `lib/events/` コンポーネントを利用できる。
 
-## Development
+## 開発
 
-Requires Node.js 22.13 or later; use Node.js 22 LTS for the existing runtime.
+Node.js 22.13 以降が必要。既存ランタイムには Node.js 22 LTS を使う。
 
 ```sh
 npm ci --ignore-scripts
@@ -18,18 +18,18 @@ npm run check
 npm test
 ```
 
-Tests use fake Discord inputs and temporary storage. They do not need Discord or Google credentials. The separate synthetic probe remains in `server.mjs`, `production.mjs` and `lib/probe.mjs`; its cloud-backed production mode uses a private GCS bucket.
+テストはフェイクの Discord 入力と一時ストレージを使う。Discord や Google の認証情報は不要。独立した合成プローブは `server.mjs`、`production.mjs`、`lib/probe.mjs` に残っており、そのクラウド裏付けの本番モードはプライベート GCS バケットを使う。
 
-## Run the continuous Discord host
+## 常駐 Discord ホストの実行
 
-The provided service files are examples for an independently configured Linux VM. They do not provision infrastructure or permissions.
+付属のサービスファイルは、独立して設定された Linux VM 向けの例である。インフラや権限をプロビジョニングしない。
 
-1. Install the source and production dependencies at `/opt/discord-mcp`, with Node available at `/usr/local/bin/node`. Create an unprivileged `discord-mcp` user. Keep `/var/lib/discord-mcp` private to that user and retain it across restarts.
-2. Use `deployment/gce/runtime.env.example` as the basis for a root-readable `/etc/discord-mcp/runtime.env`. Set your own `GCE_DISCORD_ORIGIN`, `DISCORD_GUILD_ID`, `DISCORD_BOT_ID`, Google Web client ID, Google-authoritative owner email and exact connector redirect URI. Register the HTTPS origin with the Google Web client. `guild-visible` follows the bot's existing visibility; `allowlist` additionally requires `DISCORD_CHANNEL_IDS` as a JSON array.
-3. Supply a Discord bot token and a separate OAuth signing/cookie JSON document through systemd credentials. The document needs `cookieKeys` (an array of random strings of at least 32 bytes) and `jwks.keys` (an array of private RSA JWK objects with at least 2048-bit keys). Store real values outside the checkout. The optional `discord-mcp-secrets.service` loads pinned Secret Manager versions using VM identity; configure the `MCP_*` settings and grant that identity access only to those two secrets. No service-account key file is used.
-4. Install the two example units from `deployment/gce/` into systemd. For another credential provider, replace the secret-loader unit while preserving the two `/run/discord-mcp-secrets/` credential files. Provide nginx with a valid certificate, render the `@@HOST@@` placeholders, and install the proxy snippet and timing-log format. Expose only the routes in the HTTPS example. MCP and OAuth must use HTTPS.
-5. Start the prepared host with `sudo systemctl daemon-reload` and `sudo systemctl enable --now discord-mcp.service`. The unit runs the equivalent of `npm start` under a process lock, binds Node to `127.0.0.1:8080`, and supplies the credential directory. Check `/healthz`, then connect the consumer to `https://<your-host>/mcp/discord` and subscribe to `discord.mention.created` for your guild.
+1. `/opt/discord-mcp` にソースと本番依存をインストールし、Node を `/usr/local/bin/node` で利用可能にする。非特権の `discord-mcp` ユーザーを作成する。`/var/lib/discord-mcp` はそのユーザー専用にし、再起動を越えて保持する。
+2. `deployment/gce/runtime.env.example` をもとに、root が読める `/etc/discord-mcp/runtime.env` を作る。自身の `GCE_DISCORD_ORIGIN`、`DISCORD_GUILD_ID`、`DISCORD_BOT_ID`、Google Web クライアント ID、Google が権威を持つオーナーメール、厳密なコネクタリダイレクト URI を設定する。HTTPS オリジンを Google Web クライアントに登録する。`guild-visible` は bot の既存の可視範囲に従う。`allowlist` は追加で `DISCORD_CHANNEL_IDS`（JSON 配列）を必須とする。
+3. Discord bot トークンと、別の OAuth 署名/クッキー JSON ドキュメントを systemd クレデンシャル経由で供給する。ドキュメントには `cookieKeys`（少なくとも 32 バイトのランダム文字列の配列）と `jwks.keys`（2048 ビット以上の秘密 RSA JWK オブジェクトの配列）が必要。実値はチェックアウト外に保存する。任意の `discord-mcp-secrets.service` は VM のIDを使って固定済み Secret Manager バージョンを読み込む。`MCP_*` 設定を構成し、その ID には 2 つのシークレットへのアクセスのみ許可する。サービスアカウントのキーファイルは使わない。
+4. `deployment/gce/` の 2 つのユニット例を systemd にインストールする。別のクレデンシャルプロバイダを使う場合は、`/run/discord-mcp-secrets/` の 2 つのクレデンシャルファイルを維持したままシークレットローダーユニットを差し替える。nginx には有効な証明書を用意し、`@@HOST@@` プレースホルダをレンダリングして、プロキシスニペットとタイミングログ形式をインストールする。HTTPS 例にあるルートのみを公開する。MCP と OAuth は HTTPS を使わなければならない。
+5. 準備済みホストを `sudo systemctl daemon-reload` と `sudo systemctl enable --now discord-mcp.service` で起動する。ユニットはプロセスロックの下で `npm start` 相当を実行し、Node を `127.0.0.1:8080` にバインドし、クレデンシャルディレクトリを供給する。`/healthz` を確認してから、コンシューマを `https://<your-host>/mcp/discord` に接続し、対象ギルドの `discord.mention.created` を購読する。
 
-The bot needs access to the chosen guild/channels, Gateway guild and guild-message intents (mask 513), and channel permissions to view, send replies and add reactions. The implementation does not change Discord roles or channel permissions. Set `GCE_DISCORD_REPLIES_ENABLE=true` only when automatic replies are wanted. Keep OAuth grants, databases, credentials and logs out of source control.
+bot には対象ギルド/チャンネルへのアクセス、Gateway の guild および guild-message インテント（マスク 513）、閲覧・返信送信・リアクション追加のチャンネル権限が必要。実装は Discord のロールやチャンネル権限を変更しない。`GCE_DISCORD_REPLIES_ENABLE=true` は自動返信が必要な場合のみ設定する。OAuth 許可・データベース・認証情報・ログはソース管理に入れない。
 
-This repository contains generic examples and fake fixtures, without deployment history or live operational configuration.
+このリポジトリは汎用的な例とフェイクのフィクスチャのみを含み、デプロイ履歴や実運用設定は含まない。

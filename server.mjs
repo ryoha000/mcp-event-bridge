@@ -11,8 +11,8 @@ export function assertAuth(auth) {
   if (!auth || typeof auth.authenticate !== 'function' || typeof auth.handleHttp !== 'function' ||
       typeof auth.challenge !== 'string' || /[\r\n]/.test(auth.challenge) || !auth.challenge.startsWith('Bearer ')) throw new Error('OAuth adapter required');
 }
-// No caller-controlled identity headers are trusted. OAuth adapter returns stable
-// verified issuer+subject owner identities, after audience/scope/expiry checks.
+// 呼び出し側が制御できるIDヘッダは一切信用しない。OAuthアダプタは
+// audience/scope/有効期限の検査の後、検証済み issuer+subject の安定したオーナーIDを返す。
 export function createRequestListener({auth, store, transport = callbackTransport, handlerFactory, ingestEvent, receiverRequest}) {
   assertAuth(auth); assertStore(store);
   const probe = createHandler(store, transport);
@@ -25,7 +25,7 @@ export function createRequestListener({auth, store, transport = callbackTranspor
       const ingest=req.url==='/ingest/discord'&&typeof ingestEvent==='function';
       const receiver=typeof receiverRequest==='function'&&['/receiver/discord/claim','/receiver/discord/receipt','/receiver/discord/drain'].includes(req.url);
       if (req.url !== '/mcp'&&!discordConsumer&&!ingest&&!receiver) { json(res, 404, {error:'Not found'}); return; }
-      // Authenticate even discovery: metadata is provided through the auth adapter.
+      // ディスカバリにも認証を要求する。メタデータは auth アダプタ経由で提供する。
       const principal = await auth.authenticate(req);
       if (!principal || typeof principal.owner !== 'string' || !principal.owner || principal.owner.length > 512) {
         res.writeHead(401, {'www-authenticate':typeof auth.challengeForRequest==='function'?auth.challengeForRequest(req):auth.challenge, 'cache-control':'no-store'}); res.end(); return;

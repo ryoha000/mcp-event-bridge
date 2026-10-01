@@ -18,17 +18,17 @@ import {tmpdir} from 'node:os';
 
 function backend(){const data=new Map();return {durable:true,read:async k=>structuredClone(data.get(k)??null),update:async(k,fn)=>{const next=fn(structuredClone(data.get(k)??null));if(Object.hasOwn(next,'value'))data.set(k,structuredClone(next.value));return next.result;}};}
 const config={origin:'https://probe.example',resource:'https://probe.example/mcp',googleClientId:'123-fixture.apps.googleusercontent.com',ownerEmail:'fixture@gmail.com',redirects:['https://chatgpt.com/connector_platform_oauth_redirect'],cookieKeys:['EPHEMERAL-LOCAL-TEST-COOKIE-KEY-DO-NOT-DEPLOY'],jwks:{keys:[{...generateKeyPairSync('rsa',{modulusLength:2048}).privateKey.export({format:'jwk'}),use:'sig',alg:'RS256',kid:'test-only'}]},discordEnabled:true};
-test('Discord OAuth scopes are opt-in and resource-bound',async()=>{
+test('Discord OAuthスコープはオプトインでresource束縛',async()=>{
   const enabled=providerConfiguration(config,backend());assert.ok(enabled.scopes.includes('discord:read'));assert.ok(enabled.scopes.includes('discord:reply'));
   const disabled=providerConfiguration({...config,discordEnabled:false},backend());assert.deepEqual(disabled.scopes,['openid','offline_access','probe']);
   assert.equal((await enabled.features.resourceIndicators.getResourceServerInfo({},config.resource)).scope,'probe discord:read discord:reply');
 });
 
-test('multi-role OAuth challenge does not incorrectly require probe scope; synthetic-only default keeps its challenge',()=>{
+test('複数ロールのOAuthチャレンジはprobeスコープを誤って要求しない。合成専用の既定は従来のチャレンジを維持',()=>{
   const enabled=createOAuth({config,backend:backend()});assert.ok(enabled.challenge.includes('oauth-protected-resource/mcp'));assert.equal(enabled.challenge.includes('scope="probe"'),false);
   const probe=createOAuth({config:{...config,discordEnabled:false},backend:backend()});assert.ok(probe.challenge.includes('scope="probe"'));
 });
-test('subscription authorizer stops owner/client/grant revocation, expiry and removed read scope',async()=>{
+test('サブスクリプション認可はオーナー/クライアント/許可の失効・期限切れ・readスコープ削除を止める',async()=>{
   const b=backend();let at=100;const A=createOidcAdapter(b,{now:()=>at});const grant=new A('Grant'),client=new A('Client');
   await b.update('google-owner:v1',()=>({value:{sub:'123'}}));await client.upsert('client',{client_id:'client'});
   const payload={accountId:'google:123',clientId:'client',resources:{[config.resource]:'discord:read discord:reply'}};
@@ -40,7 +40,7 @@ test('subscription authorizer stops owner/client/grant revocation, expiry and re
   await grant.upsert('grant',payload,100);await client.destroy('client');assert.equal(await authorize('google:123',sub),false);await client.upsert('client',{client_id:'client'});
   await grant.revokeByGrantId('grant');assert.equal(await authorize('google:123',sub),false);
 });
-test('real local OAuth flow grants Discord read only, displays context restrictions and blocks reply/probe',async t=>{
+test('実ローカルOAuthフローはDiscord readのみ付与し、コンテキスト制約を表示してreply/probeをブロックする',async t=>{
   const b=backend();let nonce='';const sends=[];const adapter=createDiscordAdapter({channelIds:['100000000000002200'],sendMessage:async(...a)=>{sends.push(a);return {ok:true};}});
   const store=createEventStore({backend:b});const events=createEventService({store,adapters:[adapter],transport:async()=>{throw Error('Offline only');}});
   const auth=createOAuth({config,backend:b,google:{verifyIdToken:async()=>({getPayload:()=>({iss:'https://accounts.google.com',aud:config.googleClientId,nonce,email:'fixture@gmail.com',email_verified:true,sub:'123'})})}});
@@ -74,7 +74,7 @@ test('real local OAuth flow grants Discord read only, displays context restricti
   assert.equal((await rpc('tools/list')).status,401);
 });
 
-for(const storageKind of ['memory','sqlite'])test('isolated consumer issuer completes PKCE, narrows discovery, blocks receiver/probe and keeps origin-only tools ('+storageKind+')',async t=>{
+for(const storageKind of ['memory','sqlite'])test('分離コンシューマissuerはPKCEを完了し、ディスカバリを絞り、receiver/probeをブロックし、オリジン限定ツールを維持する ('+storageKind+')',async t=>{
   const consumerConfig={...config,origin:config.origin+'/discord',resource:config.origin+'/mcp/discord',discordConsumerOnly:true,discordUnattendedEnabled:true};
   const b=storageKind==='sqlite'?createSqliteObjectBackend({filename:join(mkdtempSync(join(tmpdir(),'discord-oauth-sqlite-')),'state.sqlite3')}):backend();t.after(()=>b.close?.());let nonce='';const sends=[];const adapter=createDiscordAdapter({channelIds:['100000000000002200'],sendMessage:async(...a)=>{sends.push(a);return {ok:true};}});
   const store=createEventStore({backend:b});const events=createEventService({store,adapters:[adapter],queueReplies:true,transport:async(_url,options)=>({ok:true,json:async()=>({challenge:JSON.parse(options.body).challenge})})});
@@ -123,7 +123,7 @@ for(const storageKind of ['memory','sqlite'])test('isolated consumer issuer comp
   assert.equal((await rpc('tools/list')).status,401);assert.equal(await check('google:123',{...command.authorization,name:'discord.mention.created'},['discord:read','discord:reply']),false);
 });
 
-test('consumer routing preserves the main issuer and supplies endpoint-specific challenge before authentication',async t=>{
+test('コンシューマルーティングはメインissuerを維持し、認証前にエンドポイント固有のチャレンジを返す',async t=>{
  const main=createOAuth({config,backend:backend()}),consumer=createOAuth({config:{...config,origin:config.origin+'/discord',resource:config.origin+'/mcp/discord',discordConsumerOnly:true},backend:backend()});
  const routed=routeConsumerOAuth(main,consumer);const server=createServer(createRequestListener({auth:routed,store:memoryStore()}));await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>server.close(r)));const base='http://127.0.0.1:'+server.address().port;
  for(const [path,expected]of [['/mcp',main.challenge],['/mcp/discord',consumer.challenge]]){const r=await fetch(base+path,{method:'POST',headers:{'content-type':'application/json'},body:'{}'});assert.equal(r.status,401);assert.equal(r.headers.get('www-authenticate'),expected);}

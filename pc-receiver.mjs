@@ -14,8 +14,8 @@ import {writeWindowsSecret} from './lib/adapters/windows-secret.mjs';
 import {createBridgeCredential} from './lib/adapters/bridge-credential.mjs';
 import {discordRetention} from './lib/adapters/discord-retention.mjs';
 
-// Portable receiver orchestration. Network, credential access and timers are
-// dependencies so the whole flow is exercised offline. Bot token stays here.
+// ポータブルなレシーバー制御。ネットワーク、認証情報アクセス、タイマーは
+// 依存注入するため、全体の流れをオフラインで検証できる。botトークンはここに留まる。
 export async function createPcReceiver({backend,adapter,token,forwardEnvelope,bridgeRequest,
   gatewayFactory=createDiscordGateway,timers={setTimeout,clearTimeout},onError=()=>{},onFatal=()=>{},onGatewayState=()=>{},retention,now=Date.now,pollIntervalMs=30000,repliesEnabled=false,owner='windows-discord-receiver'}){
   const store=createEventStore({backend,retryUntilAcknowledged:true,retention,now});
@@ -32,7 +32,7 @@ export async function createPcReceiver({backend,adapter,token,forwardEnvelope,br
       const requestId=await backend.update(key,old=>old?.requestId?{result:old.requestId}:{value:{requestId:randomUUID()},result:undefined});
       const savedId=requestId??(await backend.read(key)).requestId;
       const response=await bridgeRequest('claim',{requestId:savedId});
-      if(stopped)return; // Keep request identity/claim; successor can reconcile.
+      if(stopped)return; // リクエストID/クレームは保持。後続プロセスが整合させる。
       if(response.command){
         if(response.command.requestId!==savedId)throw Error('Reply request mismatch');
         if(repliesEnabled!==true){onError('Reply held; live validation gate has not enabled Discord sends');return;}

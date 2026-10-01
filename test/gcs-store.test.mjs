@@ -5,8 +5,8 @@ import { createGcsObjectBackend, createGcsStore } from '../lib/gcs-store.mjs';
 import { assertStore } from '../lib/store.mjs';
 import { createHandler, EVENT, TEXT } from '../lib/probe.mjs';
 
-// Entire GCS API is in-memory. Tests do not instantiate a real SDK client or
-// resolve credentials, make network requests, create a bucket, or change IAM.
+// GCS API全体をメモリ内で再現。テストは実際のSDKクライアントの生成、
+// 認証情報の解決、ネットワークリクエスト、バケット作成、IAM変更を行わない。
 const PROBE = '00000000-0000-4000-8000-000000000000';
 const OTHER_PROBE = '00000000-0000-4000-8000-000000000001';
 const OWNER = 'https://issuer.example|fixture-user';
@@ -74,7 +74,7 @@ function fixture(options = {}) {
   return { storage, backend, store: createGcsStore({ backend, now: () => NOW }) };
 }
 
-test('construction is offline; names are hashed and writes use explicit generation CAS', async () => {
+test('構築はオフライン。名前はハッシュ化され、書き込みは明示的な世代CASを使う', async () => {
   const { storage, store } = fixture();
   assert.equal(storage.calls.length, 0);
   assert.equal(assertStore(store, true), store);
@@ -96,7 +96,7 @@ test('construction is offline; names are hashed and writes use explicit generati
   assert.deepEqual(download.options, { decompress: false, validation: 'crc32c' });
 });
 
-test('claim and receipt survive refresh, unsubscribe, URL changes, expiry and new instances', async () => {
+test('クレームと受領記録はリフレッシュ・購読解除・URL変更・期限切れ・新インスタンスを越えて残る', async () => {
   const { storage, store } = fixture();
   await store.put(row());
   assert.equal(await store.claim('sub_fixture', OWNER), true);
@@ -117,7 +117,7 @@ test('claim and receipt survive refresh, unsubscribe, URL changes, expiry and ne
   assert.deepEqual((await restarted.byProbe(OWNER, PROBE)).receipt, accepted);
 });
 
-test('different processes contend on one owner object and only one probe claim succeeds', async () => {
+test('別プロセスが1つのオーナーオブジェクトで競合し、プローブのクレームは1つだけ成功する', async () => {
   const { storage, store } = fixture();
   await store.put(row());
   const stores = Array.from({ length: 6 }, () => fixture({ storage }).store);
@@ -126,7 +126,7 @@ test('different processes contend on one owner object and only one probe claim s
   assert.equal(storage.raw().claims.length, 1);
 });
 
-test('refresh and claim CAS races preserve both the winning claim and refreshed credentials', async () => {
+test('リフレッシュとクレームのCAS競合でも、勝ったクレームと更新済み認証情報の両方が残る', async () => {
   const { storage, store } = fixture();
   const peer = fixture({ storage }).store;
   await store.put(row());
@@ -138,20 +138,20 @@ test('refresh and claim CAS races preserve both the winning claim and refreshed 
   assert.equal(await peer.claim('sub_fixture', OWNER), false);
 });
 
-test('unsubscribe and late receipt preserve permanent claim without callback credentials', async () => {
+test('購読解除と遅延受領でも、コールバック認証情報なしで永続クレームが残る', async () => {
   const { storage, store } = fixture();
   await store.put(row());
   await store.claim('sub_fixture', OWNER);
   await store.remove('sub_fixture', OWNER);
   await store.receipt('sub_fixture', OWNER, unknown);
-  await store.receipt('sub_fixture', OWNER, accepted); // First receipt is immutable.
+  await store.receipt('sub_fixture', OWNER, accepted); // 最初の受領記録は不変。
   assert.deepEqual(storage.raw().claims[0].receipt, unknown);
   await store.put(row());
   assert.deepEqual((await store.get('sub_fixture', OWNER)).receipt, unknown);
   assert.equal(await store.claim('sub_fixture', OWNER), false);
 });
 
-test('unsubscribe racing with claim either prevents claim or retains a permanent claim', async () => {
+test('購読解除とクレームの競合では、クレームを防ぐか永続クレームが残るかのどちらかになる', async () => {
   const { storage, store } = fixture();
   await store.put(row());
   const [claimed] = await Promise.all([store.claim('sub_fixture', OWNER), store.remove('sub_fixture', OWNER)]);
@@ -163,7 +163,7 @@ test('unsubscribe racing with claim either prevents claim or retains a permanent
   }
 });
 
-test('every operation is owner-scoped; expired subscriptions cannot be claimed', async () => {
+test('全操作はオーナー単位。期限切れサブスクリプションはクレームできない', async () => {
   const { store } = fixture();
   await store.put(row());
   await store.remove('sub_fixture', 'other-owner');
@@ -179,7 +179,7 @@ test('every operation is owner-scoped; expired subscriptions cannot be claimed',
   assert.equal(await store.claim('sub_fixture', 'other-owner'), true);
 });
 
-test('latest-expiring subscription is selected; every subscription for one probe shares the claim', async () => {
+test('期限が最も遅いサブスクリプションが選ばれる。1プローブの全サブスクリプションはクレームを共有する', async () => {
   const { store } = fixture();
   await store.put(row());
   await store.put(row({ id: 'other-url', expires: NOW + 8000 }));
@@ -189,7 +189,7 @@ test('latest-expiring subscription is selected; every subscription for one probe
   assert.equal(await store.claim('other-url', OWNER), false);
 });
 
-test('status has a fixed safe schema; receipt strips additional sensitive diagnostics', async () => {
+test('status は固定の安全スキーマ。受領記録は余分な機微な診断を取り除く', async () => {
   const { store } = fixture();
   await store.put(row());
   await store.claim('sub_fixture', OWNER);
@@ -201,7 +201,7 @@ test('status has a fixed safe schema; receipt strips additional sensitive diagno
   await assert.rejects(store.receipt('sub_fixture', OWNER, { ...accepted, outcome: URL }), { code: 'STORAGE_INPUT' });
 });
 
-test('definite write conflicts retry finitely; permission and ambiguous errors do not retry or leak', async () => {
+test('確定的な書き込み競合は有限回リトライ。権限エラーや曖昧なエラーはリトライせず漏洩もしない', async () => {
   const { storage, store } = fixture({ maxAttempts: 3 });
   storage.beforeSave = () => { throw error(412); };
   await assert.rejects(store.put(row()), { code: 'STORAGE_CONFLICT' });
@@ -217,7 +217,7 @@ test('definite write conflicts retry finitely; permission and ambiguous errors d
   assert.equal(storage.calls.filter(call => call.operation === 'save').length, 1);
 });
 
-test('write timeout after persisted claim fails closed and cannot lead to a second claim', async () => {
+test('永続クレーム後の書き込みタイムアウトはフェイルクローズし、2回目のクレームにつながらない', async () => {
   const { storage, store } = fixture();
   await store.put(row());
   let attempts = 0;
@@ -230,7 +230,7 @@ test('write timeout after persisted claim fails closed and cannot lead to a seco
   assert.equal((await restarted.get('sub_fixture', OWNER)).sent, true);
 });
 
-test('generation-pinned read retries if old generation vanishes; never combines old metadata with new bytes', async () => {
+test('世代固定読み取りは旧世代消失時にリトライ。旧メタデータと新バイトを組み合わせない', async () => {
   const { storage, backend } = fixture();
   await backend.update('oauth-state:v1', () => ({ value: { count: 1 } }));
   let replaced = false;
@@ -242,7 +242,7 @@ test('generation-pinned read retries if old generation vanishes; never combines 
   assert.deepEqual(downloads.map(call => call.generation), ['1', '2']);
 });
 
-test('generic aggregate update is atomic, returns mutator results, and supports no-write', async () => {
+test('汎用集約のupdateはアトミックで、ミューテータの結果を返し、無書き込みも可能', async () => {
   const { storage, backend } = fixture();
   assert.equal(await backend.read('oauth-state:v1'), null);
   await backend.update('oauth-state:v1', () => ({ value: { consumed: false, revoked: false } }));
@@ -257,7 +257,7 @@ test('generic aggregate update is atomic, returns mutator results, and supports 
   await assert.rejects(backend.update('oauth-state:v1', async state => ({ value: state })), { code: 'STORAGE_INPUT' });
 });
 
-test('capacity, malformed state and unsupported metadata fail closed without deleting data', async () => {
+test('容量・不正状態・非対応メタデータはデータ削除なしでフェイルクローズ', async () => {
   const { storage, backend, store } = fixture({ maxBytes: 1024 });
   await store.put(row());
   const original = Buffer.from([...storage.objects.values()][0].bytes);
@@ -274,7 +274,7 @@ test('capacity, malformed state and unsupported metadata fail closed without del
   await assert.rejects(store.status(OWNER), { code: 'STORAGE_CORRUPT' });
 });
 
-test('invalid owners, probe IDs, subscription remapping and mutable sent flags cannot reopen claims', async () => {
+test('不正なオーナー/プローブID/サブスクリプション再割当て/可変sentフラグでクレームを再開できない', async () => {
   const { store } = fixture();
   await assert.rejects(store.put(row({ owner: '' })), { code: 'STORAGE_INPUT' });
   await assert.rejects(store.put(row({ probe_id: URL })), { code: 'STORAGE_INPUT' });
@@ -286,7 +286,7 @@ test('invalid owners, probe IDs, subscription remapping and mutable sent flags c
   await assert.rejects(store.put(row({ probe_id: OTHER_PROBE })), { code: 'STORAGE_INPUT' });
 });
 
-test('protocol running on mocked GCS emits at most once, including ambiguous delivery and URL changes', async () => {
+test('モックGCS上のプロトコルは曖昧な配送やURL変更を含めて最大1回だけ送出する', async () => {
   const { backend } = fixture();
   const store = createGcsStore({ backend });
   let deliveries = 0;

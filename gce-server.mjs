@@ -14,9 +14,9 @@ import {createDiscordCallbackTransport} from './lib/events/callback-transport.mj
 import {createDiscordEyes} from './lib/adapters/discord-reaction.mjs';
 import {createTimingSink} from './lib/events/timing.mjs';
 
-// Preparation is local only. This entry point never provisions a VM, IAM, DNS,
-// certificates or secrets. Systemd supplies approved files from its credentials
-// directory; public HTTPS is a fixed nginx -> 127.0.0.1:8080 route.
+// 準備はローカルのみ。このエントリポイントは VM、IAM、DNS、証明書、シークレットを
+// 一切プロビジョニングしない。systemd が credentials ディレクトリから承認済み
+// ファイルを供給し、公開HTTPSは nginx -> 127.0.0.1:8080 の固定経路。
 export async function prepareGceServer(env,dependencies={}){
  if(env.GCE_DISCORD_ENABLE!=='true'||env.GOOGLE_APPLICATION_CREDENTIALS||env.STORAGE_EMULATOR_HOST||env.PROBE_BUCKET||env.CONSOLIDATED_DISCORD_ENABLE)throw Error('GCE deployment configuration required');
  const origin=new URL(env.GCE_DISCORD_ORIGIN??'');

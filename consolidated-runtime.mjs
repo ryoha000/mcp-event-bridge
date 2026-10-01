@@ -9,8 +9,8 @@ import {createRequestListener} from './server.mjs';
 import {memoryStore} from './lib/store.mjs';
 import {AsyncLocalStorage} from 'node:async_hooks';
 import {randomUUID} from 'node:crypto';
-// No old bridge HTTP calls, receiver spool, poll nonce or second send ledger.
-// New issuer/state belongs to this instance; old probe/consumer grants stay put.
+// 旧ブリッジのHTTP呼び出し、レシーバースプール、ポーリング用ナンス、第2送信台帳は使わない。
+// 新しいissuer/状態はこのインスタンスに属し、旧プローブ/コンシューマの許可(grant)はそのまま残る。
 export async function createConsolidatedRuntime({backend,auth,resource,channelIds,token,sendMessage,transport,repliesEnabled=false,gatewayFactory=createDiscordGateway,gatewayOwnership='durable-lease',gatewaySessionKey='consolidated-gateway:v1',authorizeSubscription,now=Date.now,timers={setTimeout,clearTimeout},onError=()=>{},onFatal=()=>{},onGatewayState=()=>{},reaction,onTiming=()=>{},inlineMentions=false,channelScope='allowlist'}){
  if(backend?.durable!==true||!resource?.endsWith('/mcp/discord')||!auth)throw Error('Consolidated runtime configuration refused');
  const store=createEventStore({backend,retention:discordRetention,requireLiveSubscription:true,now});
@@ -31,7 +31,7 @@ export async function createConsolidatedRuntime({backend,auth,resource,channelId
      const pinned=await backend.read('google-owner:v1');if(!pinned?.sub)throw Object.assign(Error('Owner consent pending'),{code:'EVENT_SUBSCRIPTION_PAUSED'});
      const owner='google:'+pinned.sub,began=performance.now();timing('ingest_started',{eventId:event.eventId});await store.ingest(owner,event);timing('ingest_committed',{eventId:event.eventId,durationMs:performance.now()-began});void worker.wake(owner);return;
     }catch(error){
-     if(error?.code==='EVENT_EXPIRED')return; // Intentional aged discard; no reply/admission is possible.
+     if(error?.code==='EVENT_EXPIRED')return; // 意図的な経過時間切れ破棄。返信/受理は不可能。
      if(!['EVENT_SUBSCRIPTION_PAUSED','EVENT_CAPACITY','STORAGE_CAPACITY'].includes(error?.code))throw error;
      try{onError('Consolidated ingest paused; Gateway sequence retained');}catch{}
      await new Promise(done=>{releasePressure=done;pressureTimer=timers.setTimeout(done,15000);});
