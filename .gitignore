@@ -19,3 +19,8 @@ runtime.env
 deployment/gce/live/
 deployment/gce/rendered/
 *handoff*.json
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example

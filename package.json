@@ -9,7 +9,8 @@
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "check": "node scripts/check.mjs",
-    "start": "node gce-server.mjs"
+    "start": "node gce-server.mjs",
+    "deploy": "node scripts/deploy-gce.mjs"
   },
   "dependencies": {
     "@google-cloud/storage": "8.2.0",

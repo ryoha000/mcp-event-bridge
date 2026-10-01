@@ -1,0 +1,10 @@
+# 任意: Terraform state を共有/CI 用に GCS に置く。
+# バケットを一度だけ作成し、このファイルを backend.tf にコピーして
+# `terraform init -migrate-state` を実行する。
+#
+# terraform {
+#   backend "gcs" {
+#     bucket = "your-tfstate-bucket"
+#     prefix = "discord-mcp"
+#   }
+# }

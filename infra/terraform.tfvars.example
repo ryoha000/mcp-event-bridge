@@ -1,0 +1,14 @@
+# terraform.tfvars にコピーする。以下の値は既存の workspace-401020 インフラを
+# 取り込むもの。
+#   1. gcloud auth application-default login
+#   2. terraform -chdir=infra init && terraform -chdir=infra apply
+#   3. .env.example から .env を作成して実値を入れる
+#   4. npm run deploy
+project_id     = "workspace-401020"
+project_number = "894626726945"
+github_repo    = "ryoha000/mcp-event-bridge"
+admin_members  = ["user:the7uya@gmail.com"]
+
+# 任意: ゾーンが Cloud DNS にあれば A レコードを自動作成する。
+# hostname      = "dot.ryoha.moe"
+# dns_zone_name = "ryoha-moe"

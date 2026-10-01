@@ -33,3 +33,21 @@ npm test
 bot には対象ギルド/チャンネルへのアクセス、Gateway の guild および guild-message インテント（マスク 513）、閲覧・返信送信・リアクション追加のチャンネル権限が必要。実装は Discord のロールやチャンネル権限を変更しない。`GCE_DISCORD_REPLIES_ENABLE=true` は自動返信が必要な場合のみ設定する。OAuth 許可・データベース・認証情報・ログはソース管理に入れない。
 
 このリポジトリは汎用的な例とフェイクのフィクスチャのみを含み、デプロイ履歴や実運用設定は含まない。
+
+## プロビジョニングとデプロイの自動化
+
+`infra/` には上記の単一 VM 構成（インスタンス、IAM、Secret Manager のコンテナ、ファイアウォール、固定 IP、GitHub Actions 用 Workload Identity Federation）を定義した Terraform がある。`terraform.tfvars.example` をコピーして apply し、シークレットのバージョンは後から Secret Manager に追加する。
+
+```sh
+gcloud auth application-default login
+terraform -chdir=infra init && terraform -chdir=infra apply
+```
+
+`.env.example` から `.env`（gitignore 対象）を作り、IAP SSH 経由でコミット済みツリーをデプロイする。デプロイは冪等で、コミットと設定に変更がなければ再起動しない。
+
+```sh
+npm run deploy -- --dry-run   # 構築と検証のみ
+npm run deploy                # アップロード + インストール + ヘルスチェック
+```
+
+`.github/workflows/` は push ごとに `check`+`test` を実行し（ci）、グリーンになった `main` を Workload Identity Federation 経由でデプロイする（cd）。`production` environment は `.env` と同じ名前の値を持つ： secrets の `GCP_WIF_PROVIDER`、`GCP_DEPLOY_SA`（どちらも Terraform の output）、`DISCORD_GUILD_ID`、`DISCORD_BOT_ID`、および残りの variables。

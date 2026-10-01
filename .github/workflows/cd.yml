@@ -1,0 +1,52 @@
+name: cd
+
+on:
+  workflow_run:
+    workflows: [ci]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-gce
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      # CI では .env は使わない — 全ての値は production 環境の
+      # variables/secrets から供給される。
+      - run: node scripts/deploy-gce.mjs
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_GOOGLE_CLIENT_ID: ${{ vars.DEPLOY_GOOGLE_CLIENT_ID }}
+          DEPLOY_CHANNEL_IDS: ${{ vars.DEPLOY_CHANNEL_IDS }}
+          DEPLOY_PROJECT: ${{ vars.DEPLOY_PROJECT }}
+          DEPLOY_PROJECT_NUMBER: ${{ vars.DEPLOY_PROJECT_NUMBER }}
+          DEPLOY_ZONE: ${{ vars.DEPLOY_ZONE }}
+          DEPLOY_INSTANCE: ${{ vars.DEPLOY_INSTANCE }}
+          DEPLOY_CERTBOT_EMAIL: ${{ vars.DEPLOY_CERTBOT_EMAIL }}
+          DEPLOY_NODE_VERSION: ${{ vars.DEPLOY_NODE_VERSION }}
+          DISCORD_GUILD_ID: ${{ secrets.DISCORD_GUILD_ID }}
+          DISCORD_BOT_ID: ${{ secrets.DISCORD_BOT_ID }}
+          GOOGLE_ALLOWED_EMAIL: ${{ vars.GOOGLE_ALLOWED_EMAIL }}
