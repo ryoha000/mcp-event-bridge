@@ -1,0 +1,38 @@
+server {
+    listen 80 default_server;
+    server_name @@HOST@@;
+    access_log off;
+    error_log /dev/null crit;
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/lib/letsencrypt;
+        default_type text/plain;
+        try_files $uri =404;
+    }
+    location / { return 404; }
+}
+server {
+    listen 443 ssl default_server;
+    server_name _;
+    ssl_reject_handshake on;
+    access_log off;
+    error_log /dev/null crit;
+}
+server {
+    listen 443 ssl;
+    server_name @@HOST@@;
+    ssl_certificate /etc/letsencrypt/live/discord-mcp/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/discord-mcp/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:discord_mcp_tls:1m;
+    server_tokens off;
+    access_log off;
+    error_log /dev/null crit;
+    client_max_body_size 32k;
+    client_body_timeout 15s;
+    add_header Strict-Transport-Security "max-age=86400" always;
+    location = /mcp/discord { access_log /var/log/nginx/discord-mcp-timing.log discord_mcp_timing; include /etc/nginx/snippets/discord-mcp-proxy.conf; }
+    location ^~ /discord/ { include /etc/nginx/snippets/discord-mcp-proxy.conf; }
+    location ^~ /.well-known/ { include /etc/nginx/snippets/discord-mcp-proxy.conf; }
+    location = /healthz { include /etc/nginx/snippets/discord-mcp-proxy.conf; }
+    location / { return 404; }
+}

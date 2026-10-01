@@ -1,0 +1,13 @@
+# 初回証明書発行用。MCP/OAuthは平文HTTPで公開しない。
+server {
+    listen 80 default_server;
+    server_name @@HOST@@;
+    access_log off;
+    error_log /dev/null crit;
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/lib/letsencrypt;
+        default_type text/plain;
+        try_files $uri =404;
+    }
+    location / { return 404; }
+}

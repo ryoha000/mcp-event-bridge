@@ -1,0 +1,46 @@
+[Unit]
+Description=Discord mention MCP service
+Requires=discord-mcp-secrets.service
+After=network-online.target discord-mcp-secrets.service
+Wants=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=exec
+User=discord-mcp
+Group=discord-mcp
+WorkingDirectory=/opt/discord-mcp
+EnvironmentFile=/etc/discord-mcp/runtime.env
+Environment=GCE_DISCORD_SYSTEMD_LOCK=held
+StateDirectory=discord-mcp
+StateDirectoryMode=0700
+LoadCredential=bot-token:/run/discord-mcp-secrets/bot-token
+LoadCredential=auth.json:/run/discord-mcp-secrets/auth.json
+ExecStart=/usr/bin/flock --nonblock /var/lib/discord-mcp/runtime.lock /usr/local/bin/node /opt/discord-mcp/gce-server.mjs
+Restart=on-failure
+RestartSec=30
+TimeoutStopSec=30
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+AmbientCapabilities=
+LimitCORE=0
+MemoryMax=512M
+TasksMax=64
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=discord-mcp
+
+[Install]
+WantedBy=multi-user.target
