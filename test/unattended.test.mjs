@@ -6,16 +6,10 @@ import Provider from 'oidc-provider';
 import {providerConfiguration} from '../lib/oauth.mjs';
 import {createOidcAdapter} from '../lib/oidc-storage.mjs';
 import {discordLifetime,DISCORD_GRANT_SECONDS,DISCORD_REFRESH_SECONDS} from '../lib/discord-lifetime.mjs';
-import {createBridgeCredential} from '../lib/adapters/bridge-credential.mjs';
 import {discordRetention} from '../lib/adapters/discord-retention.mjs';
 import {createDiscordAdapter,GUILD_ID,BOT_ID} from '../lib/adapters/discord.mjs';
-import {createDiscordRest} from '../lib/adapters/discord-rest.mjs';
 import {createEventStore} from '../lib/events/store.mjs';
 import {createEventService} from '../lib/events/service.mjs';
-import {createReceiverReplyExecutor} from '../lib/events/receiver-replies.mjs';
-import {forwardNext} from '../lib/events/bridge.mjs';
-import {createRequestListener} from '../server.mjs';
-import {memoryStore} from '../lib/store.mjs';
 const CHANNEL='100000000000000600',owner='google:123',resource='https://probe.example/mcp';
 function backend(){const data=new Map();return {durable:true,read:async k=>structuredClone(data.get(k)??null),update:async(k,f)=>{const next=f(structuredClone(data.get(k)??null));if(Object.hasOwn(next,'value')){assert.ok(Buffer.byteLength(JSON.stringify(next.value))<=1024*1024);data.set(k,structuredClone(next.value));}return next.result;}};}
 function event(at,seq=0){const id=String((BigInt(at-1420070400000)<<22n)+BigInt(seq));return createDiscordAdapter({channelIds:[CHANNEL]}).normalize({op:0,t:'MESSAGE_CREATE',d:{id,channel_id:CHANNEL,guild_id:GUILD_ID,author:{id:'100000000000002300'},type:0,mentions:[{id:BOT_ID}],content:'<@'+BOT_ID+'> fake mention',timestamp:new Date(at).toISOString()}});}
@@ -24,8 +18,7 @@ const subscription=at=>({id:'sub',clientId:'fake-client',grantId:'fake-grant',na
 test('無人ポリシーはロールを分離し、プローブ/混在許可を維持し、リフレッシュファミリーを90日に制限する',()=>{
  const ttl=discordLifetime({resource,discordUnattendedEnabled:true}),now=Math.floor(Date.now()/1000);
  assert.equal(ttl.Grant(null,{resources:{[resource]:'discord:read discord:reply'}}),DISCORD_GRANT_SECONDS);
- assert.equal(ttl.Grant(null,{resources:{[resource]:'discord:ingest discord:receive-replies'}}),DISCORD_GRANT_SECONDS);
- for(const scopes of ['probe','probe discord:read','discord:read discord:ingest',''])assert.equal(ttl.Grant(null,{resources:{[resource]:scopes}}),3600);
+ for(const scopes of ['probe','probe discord:read','discord:read other:scope',''])assert.equal(ttl.Grant(null,{resources:{[resource]:scopes}}),3600);
  assert.equal(ttl.RefreshToken(null,{scope:'openid offline_access discord:read',iiat:now}),DISCORD_REFRESH_SECONDS);
  assert.ok(ttl.RefreshToken(null,{scope:'discord:read',iiat:now-DISCORD_GRANT_SECONDS+60})<=60);
  assert.equal(ttl.RefreshToken(null,{scope:'probe',iiat:now}),3600);
@@ -34,54 +27,45 @@ test('無人ポリシーはロールを分離し、プローブ/混在許可を�
 test('90日間の2つのローテーティングクライアントファミリーは上限内に保たれ、使用済みトークンリプレイを保持し、レガシー状態を維持する',async()=>{
  let at=100000;const b=backend(),A=createOidcAdapter(b,{now:()=>at,compactRefresh:true}),r=new A('RefreshToken'),g=new A('Grant');
  await g.upsert('legacy-probe',{exp:at+3600,resources:{[resource]:'probe'}},3600);
- for(const role of ['pc','dot'])await g.upsert(role,{kind:'Grant',clientId:role,accountId:owner,exp:at+90*86400},90*86400);
+ for(const role of ['a','b'])await g.upsert(role,{kind:'Grant',clientId:role,accountId:owner,exp:at+90*86400},90*86400);
  let previous={};
  for(let step=0;step<90*96;step++){
-  for(const role of ['pc','dot']){
+  for(const role of ['a','b']){
    const id=role+'-'+step;
-   await r.upsert(id,{kind:'RefreshToken',jti:id,grantId:role,clientId:role,accountId:owner,scope:role==='pc'?'discord:ingest discord:receive-replies':'discord:read discord:reply',iat:at,exp:at+86400},86400);
+   await r.upsert(id,{kind:'RefreshToken',jti:id,grantId:role,clientId:role,accountId:owner,scope:'discord:read discord:reply',iat:at,exp:at+86400},86400);
    if(previous[role])await r.consume(previous[role]);previous[role]=id;
   }
-  if(step===1){assert.equal((await g.find('legacy-probe')).exp,100000+3600);assert.ok((await r.find('pc-0')).consumed);}
+  if(step===1){assert.equal((await g.find('legacy-probe')).exp,100000+3600);assert.ok((await r.find('a-0')).consumed);}
   at+=900;
  }
  const state=await b.read('oauth-state:v1');assert.ok(Object.keys(state.records).length<10);
  assert.ok(Object.values(state.spent).reduce((n,f)=>n+Object.keys(f.tokens).length,0)<=192);
- assert.ok(Buffer.byteLength(JSON.stringify(state))<50000);assert.equal(await r.find('pc-0'),undefined);
- assert.ok((await r.find('pc-'+(90*96-2))).consumed);await g.revokeByGrantId('pc');assert.equal(await r.find(previous.pc),undefined);
- at+=90*86400+1;await g.upsert('cleanup',{kind:'Grant'},10);assert.equal((await b.read('oauth-state:v1')).revoked.pc,undefined);
+ assert.ok(Buffer.byteLength(JSON.stringify(state))<50000);assert.equal(await r.find('a-0'),undefined);
+ assert.ok((await r.find('a-'+(90*96-2))).consumed);await g.revokeByGrantId('a');assert.equal(await r.find(previous.a),undefined);
+ at+=90*86400+1;await g.upsert('cleanup',{kind:'Grant'},10);assert.equal((await b.read('oauth-state:v1')).revoked.a,undefined);
 });
 
 test('実プロバイダはリフレッシュトークンをローテートし、再生されたファミリーを失効させ、独立したプローブ許可を残す',async t=>{
  const b=backend();await b.update('google-owner:v1',()=>({value:{sub:'123'}}));
- const config={origin:'https://probe.example',resource,googleClientId:'123-fixture.apps.googleusercontent.com',redirects:['http://127.0.0.1:8766/callback'],cookieKeys:['FAKE-LOCAL-ONLY-COOKIE-KEY-100000000000000100'],jwks:{keys:[{...generateKeyPairSync('rsa',{modulusLength:2048}).privateKey.export({format:'jwk'}),use:'sig',alg:'RS256',kid:'fake'}]},discordEnabled:true,discordReceiverEnabled:true,discordUnattendedEnabled:true};
- const configuration=providerConfiguration(config,b);configuration.clients=[{client_id:'fake-pc',redirect_uris:config.redirects,token_endpoint_auth_method:'none',grant_types:['authorization_code','refresh_token'],response_types:['code']}];
+ const config={origin:'https://probe.example',resource,googleClientId:'123-fixture.apps.googleusercontent.com',redirects:['https://chatgpt.com/connector_platform_oauth_redirect'],cookieKeys:['FAKE-LOCAL-ONLY-COOKIE-KEY-100000000000000100'],jwks:{keys:[{...generateKeyPairSync('rsa',{modulusLength:2048}).privateKey.export({format:'jwk'}),use:'sig',alg:'RS256',kid:'fake'}]},discordEnabled:true,discordUnattendedEnabled:true};
+ const configuration=providerConfiguration(config,b);configuration.clients=[{client_id:'fake-consumer',redirect_uris:config.redirects,token_endpoint_auth_method:'none',grant_types:['authorization_code','refresh_token'],response_types:['code']}];
  const Base=configuration.adapter;let raceTarget,raceCount=0,releaseRace;
  configuration.adapter=class extends Base{async find(id){const row=await super.find(id);if(this.model==='RefreshToken'&&id===raceTarget&&!row?.consumed){raceCount++;if(raceCount===2)releaseRace();else await new Promise(r=>releaseRace=r);}return row;}};
  const provider=new Provider(config.origin,configuration);provider.proxy=true;
- const grant=new provider.Grant({accountId:owner,clientId:'fake-pc'});grant.addOIDCScope('openid offline_access');grant.addResourceScope(resource,'discord:ingest discord:receive-replies');const grantId=await grant.save();
+ const grant=new provider.Grant({accountId:owner,clientId:'fake-consumer'});grant.addOIDCScope('openid offline_access');grant.addResourceScope(resource,'discord:read discord:reply');const grantId=await grant.save();
  assert.ok((await provider.Grant.find(grantId)).exp-Math.floor(Date.now()/1000)>89*86400);
- const probe=new provider.Grant({accountId:owner,clientId:'fake-pc'});probe.addResourceScope(resource,'probe');const probeId=await probe.save();assert.ok((await provider.Grant.find(probeId)).exp-Math.floor(Date.now()/1000)<=3600);
- const client=await provider.Client.find('fake-pc');const rt=new provider.RefreshToken({client,accountId:owner,grantId,resource,scope:'openid offline_access discord:ingest discord:receive-replies',expiresWithSession:false});const original=await rt.save();
+ const probe=new provider.Grant({accountId:owner,clientId:'fake-consumer'});probe.addResourceScope(resource,'probe');const probeId=await probe.save();assert.ok((await provider.Grant.find(probeId)).exp-Math.floor(Date.now()/1000)<=3600);
+ const client=await provider.Client.find('fake-consumer');const rt=new provider.RefreshToken({client,accountId:owner,grantId,resource,scope:'openid offline_access discord:read discord:reply',expiresWithSession:false});const original=await rt.save();
  const server=createServer(provider.callback());await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>server.close(r)));
- const refresh=token=>fetch('http://127.0.0.1:'+server.address().port+'/token',{method:'POST',headers:{host:'probe.example','x-forwarded-proto':'https','content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'refresh_token',client_id:'fake-pc',refresh_token:token,resource})});
+ const refresh=token=>fetch('http://127.0.0.1:'+server.address().port+'/token',{method:'POST',headers:{host:'probe.example','x-forwarded-proto':'https','content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'refresh_token',client_id:'fake-consumer',refresh_token:token,resource})});
  const first=await refresh(original);assert.equal(first.status,200);const tokens=await first.json();assert.equal(tokens.expires_in,900);assert.notEqual(tokens.refresh_token,original);
  const second=await refresh(tokens.refresh_token);assert.equal(second.status,200);const latest=await second.json();
  assert.equal((await refresh(original)).status,400);assert.equal((await refresh(latest.refresh_token)).status,400);assert.ok(await provider.Grant.find(probeId));
- const racedGrant=new provider.Grant({accountId:owner,clientId:'fake-pc'});racedGrant.addResourceScope(resource,'discord:ingest discord:receive-replies');const racedId=await racedGrant.save();
- raceTarget=await new provider.RefreshToken({client,accountId:owner,grantId:racedId,resource,scope:'offline_access discord:ingest discord:receive-replies',expiresWithSession:false}).save();
+ const racedGrant=new provider.Grant({accountId:owner,clientId:'fake-consumer'});racedGrant.addResourceScope(resource,'discord:read discord:reply');const racedId=await racedGrant.save();
+ raceTarget=await new provider.RefreshToken({client,accountId:owner,grantId:racedId,resource,scope:'offline_access discord:read discord:reply',expiresWithSession:false}).save();
  const responses=await Promise.all([refresh(raceTarget),refresh(raceTarget)]);assert.equal(raceCount,2);assert.ok(responses.every(r=>[200,400].includes(r.status)));assert.ok((await b.read('oauth-state:v1')).revoked[racedId]);assert.equal(await provider.Grant.find(racedId),undefined);
  for(const response of responses)if(response.status===200){const winning=await response.json();assert.equal((await refresh(winning.refresh_token)).status,400);assert.equal(await provider.AccessToken.find(winning.access_token),undefined);}
  assert.ok(await provider.Grant.find(probeId));
-});
-
-test('リフレッシュはsingle-flight。失われた応答は再起動を越えてフェイルクローズ印を残す',async()=>{
- let saved={origin:'https://bridge.example',clientId:'fake',accessToken:'FAKE',refreshToken:'FAKE-R',expiresAt:1},calls=0;
- const options={origin:saved.origin,readCredential:async()=>JSON.stringify(saved),writeCredential:async s=>{saved=JSON.parse(s);},now:()=>100000};
- const get=createBridgeCredential({...options,fetchImpl:async()=>{calls++;await new Promise(r=>setImmediate(r));return new Response(JSON.stringify({access_token:'FAKE-NEW',refresh_token:'FAKE-ROTATED',expires_in:900}));}});
- assert.deepEqual(await Promise.all([get(),get(),get()]),['FAKE-NEW','FAKE-NEW','FAKE-NEW']);assert.equal(calls,1);assert.equal(saved.refreshPending,false);
- saved.expiresAt=1;const lost=createBridgeCredential({...options,fetchImpl:async()=>{calls++;throw Error('lost response');}});await assert.rejects(lost());assert.equal(saved.refreshPending,true);
- const restarted=createBridgeCredential({...options,fetchImpl:async()=>{calls++;throw Error('must not call');}});const before=calls;await assert.rejects(restarted());assert.equal(calls,before);
 });
 
 test('ローリング保持はACK済みイベントを解放し、退避IDを重複排除し、保留中やunknownの作業を決して捨てない',async()=>{
@@ -112,22 +96,3 @@ test('静穏期メンテナンスは8時間のサブスクリプション上限�
  const ending=await service.handle('events/subscribe',p,{...principal,grantExpiresAt:Date.now()+60000});assert.ok(Date.parse(ending.refreshBefore)<=Date.now()+60000);
 });
 
-test('PCアップリンクはクラウドACKまで、認証・容量・ストレージの反復エラー後もメンションを保持する',async()=>{
- let at=Date.parse('2026-10-01T00:00:00Z');const store=createEventStore({backend:backend(),now:()=>at,retryUntilAcknowledged:true});await store.subscribe(owner,subscription(at));await store.ingest(owner,event(at));
- for(let n=0;n<12;n++){assert.equal((await forwardNext({store,owner,forwardEnvelope:async()=>({status:n%2?403:503})})).acknowledged,false);at+=300001;}
- assert.equal((await store.status(owner)).deliveries[0].status,'pending');assert.equal((await forwardNext({store,owner,forwardEnvelope:async()=>({status:200})})).acknowledged,true);
-});
-
-test('Discord 5xxはリトライ間で不確実のまま。上限付きローカル受領台帳は期限切れ返信を拒否する',async()=>{
- const at=Date.parse('2026-10-01T00:00:00Z'),b=backend();let calls=0;
- const adapter=createDiscordAdapter({channelIds:[CHANNEL],sendMessage:createDiscordRest({token:'FAKE',fetchImpl:async()=>{calls++;return new Response('{}',{status:500});}})});
- const command={event:event(at),content:'fake reply',requestId:'fake-request'},execute=createReceiverReplyExecutor({backend:b,adapter,retention:discordRetention,now:()=>at});
- assert.equal((await execute(command)).status,'unknown');assert.equal((await execute(command)).status,'unknown');assert.equal(calls,1);
- const expired=createReceiverReplyExecutor({backend:b,adapter,retention:discordRetention,now:()=>at+25*3600000});assert.equal((await expired({...command,event:event(at,1)})).status,'rejected');assert.equal(calls,1);
-});
-
-test('HTTP容量・ストレージエラーは終局的な認可拒否ではなくリトライ可能な503',async t=>{
- const auth={challenge:'Bearer realm="test"',handleHttp:async()=>false,authenticate:async()=>({owner})};
- const server=createServer(createRequestListener({auth,store:memoryStore(),ingestEvent:async()=>{throw Object.assign(Error('fake'),{code:'EVENT_CAPACITY'});}}));await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>server.close(r)));
- const r=await fetch('http://127.0.0.1:'+server.address().port+'/ingest/discord',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});assert.equal(r.status,503);
-});

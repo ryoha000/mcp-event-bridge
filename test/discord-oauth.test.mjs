@@ -74,7 +74,7 @@ test('実ローカルOAuthフローはDiscord readのみ付与し、コンテキ
   assert.equal((await rpc('tools/list')).status,401);
 });
 
-for(const storageKind of ['memory','sqlite'])test('分離コンシューマissuerはPKCEを完了し、ディスカバリを絞り、receiver/probeをブロックし、オリジン限定ツールを維持する ('+storageKind+')',async t=>{
+for(const storageKind of ['memory','sqlite'])test('分離コンシューマissuerはPKCEを完了し、ディスカバリを絞り、probeをブロックし、オリジン限定ツールを維持する ('+storageKind+')',async t=>{
   const consumerConfig={...config,origin:config.origin+'/discord',resource:config.origin+'/mcp/discord',discordConsumerOnly:true,discordUnattendedEnabled:true};
   const b=storageKind==='sqlite'?createSqliteObjectBackend({filename:join(mkdtempSync(join(tmpdir(),'discord-oauth-sqlite-')),'state.sqlite3')}):backend();t.after(()=>b.close?.());let nonce='';const sends=[];const adapter=createDiscordAdapter({channelIds:['100000000000002200'],sendMessage:async(...a)=>{sends.push(a);return {ok:true};}});
   const store=createEventStore({backend:b});const events=createEventService({store,adapters:[adapter],queueReplies:true,transport:async(_url,options)=>({ok:true,json:async()=>({challenge:JSON.parse(options.body).challenge})})});
@@ -92,7 +92,7 @@ for(const storageKind of ['memory','sqlite'])test('分離コンシューマissue
   const denied=await call('/discord/auth?scope=openid%20probe');assert.equal(denied.status,400);
   const reg=await call('/discord/reg',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({redirect_uris:config.redirects,token_endpoint_auth_method:'none',grant_types:['authorization_code','refresh_token'],response_types:['code']})});assert.equal(reg.status,201);const client=await reg.json();
   assert.equal(client.scope,'openid offline_access discord:read discord:reply');
-  for(const scope of ['openid probe','openid discord:ingest']){const bad=await call('/discord/reg',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({redirect_uris:config.redirects,token_endpoint_auth_method:'none',scope})});assert.equal(bad.status,400);}
+  for(const scope of ['openid probe','openid other:scope']){const bad=await call('/discord/reg',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({redirect_uris:config.redirects,token_endpoint_auth_method:'none',scope})});assert.equal(bad.status,400);}
   const verifier='EPHEMERAL-TEST-PKCE-VERIFIER-012345678901234567890';const challenge=createHash('sha256').update(verifier).digest('base64url');
   const q=new URLSearchParams({client_id:client.client_id,redirect_uri:config.redirects[0],response_type:'code',scope:'openid offline_access discord:read discord:reply',resource:consumerConfig.resource,code_challenge:challenge,code_challenge_method:'S256',state:'test'});
   const first=await call('/discord/auth?'+q);assert.equal(first.status,303);const loginPath=first.headers.get('location');nonce=new URL(loginPath).pathname.split('/').at(-1);

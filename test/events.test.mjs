@@ -189,7 +189,7 @@ test('Discord statusはイベントなしで成功し、スコープ付き件数
 test('Discord statusは状態読み取り前に、不正スコープ・任意パラメータ・期限切れ許可を拒否する',async()=>{
   let reads=0;const store={sourceStatus:async()=>{reads++;return {};}};
   const a=createDiscordAdapter({channelIds:['100000000000002200']});const svc=createEventService({store,adapters:[a]});
-  for(const scopes of [['probe'],['discord:ingest','discord:receive-replies'],['discord:reply']]){
+  for(const scopes of [['probe'],['example:read','example:reply'],['discord:reply']]){
     assert.equal(svc.tools({...principal,scopes}).some(t=>t.name==='discord_status'),false);
     await assert.rejects(svc.handle('tools/call',{name:'discord_status',arguments:{}},{...principal,scopes}));
   }
