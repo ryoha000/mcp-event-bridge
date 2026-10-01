@@ -22,14 +22,15 @@ export async function fetchGceSecrets({fetchImpl=fetch,writeSecret=writePrivate}
   const issued=JSON.parse(await getMeta('token'));if(issued.token_type!=='Bearer'||typeof issued.access_token!=='string'||!issued.access_token||issued.access_token.length>16384||/\s/.test(issued.access_token)||!Number.isFinite(issued.expires_in)||issued.expires_in<60)throw Error();
   async function secret(name,version){
    const r=await fetchImpl('https://secretmanager.googleapis.com/v1/projects/'+project+'/secrets/'+name+'/versions/'+version+':access',{headers:{authorization:'Bearer '+issued.access_token},redirect:'error',signal:AbortSignal.timeout(8000)});
-   const row=JSON.parse(await bounded(r));if(![project,projectNumber].some(p=>row.name==='projects/'+p+'/secrets/'+name+'/versions/'+version))throw Error();
+   // latest はAPI側で解決済み番号が返るため、数字のバージョン名であることだけ確認する
+   const row=JSON.parse(await bounded(r)),ok=[project,projectNumber].some(p=>{const base='projects/'+p+'/secrets/'+name+'/versions/';if(!row.name?.startsWith(base))return false;const resolved=row.name.slice(base.length);return version==='latest'?/^[0-9]+$/.test(resolved):resolved===version;});if(!ok)throw Error();
    const encoded=row.payload?.data;if(typeof encoded!=='string'||!encoded||!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded))throw Error();const bytes=Buffer.from(encoded,'base64'),crc=new CRC32C();crc.update(bytes);if(String(crc.toBuffer().readUInt32BE(0))!==String(row.payload.dataCrc32c))throw Error();return bytes;
   }
-  const bot=await secret(process.env.MCP_DISCORD_BOT_SECRET??'discord-mention-bot-token',process.env.MCP_DISCORD_BOT_SECRET_VERSION??'2'),auth=await secret(process.env.MCP_AUTH_SECRET??'discord-consolidated-auth',process.env.MCP_AUTH_SECRET_VERSION??'1');
+  const bot=await secret(process.env.MCP_DISCORD_BOT_SECRET??'discord-mention-bot-token',process.env.MCP_DISCORD_BOT_SECRET_VERSION??'latest'),auth=await secret(process.env.MCP_AUTH_SECRET??'discord-consolidated-auth',process.env.MCP_AUTH_SECRET_VERSION??'latest');
   const token=bot.toString('utf8').trim();if(!token||token.length>4096||/\s/.test(token))throw Error();authValid(auth);
-  // 固定した2つのペア全体を検証してから、ランタイムファイルを公開する。
+  // 2つのペア全体を検証してから、ランタイムファイルを公開する。
   await writeSecret('bot-token',bot);await writeSecret('auth.json',auth);
-  return {loaded:true,pinnedVersionsVerified:true};
+  return {loaded:true,versionsVerified:true};
  }catch{throw Error('VMの秘密情報を安全に読み込めませんでした。秘密値は表示していません');}
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){try{await fetchGceSecrets();console.info('固定した2つの秘密情報を一時メモリへ読み込みました');}catch{console.error('秘密情報の読み込みを拒否しました。秘密値は表示していません');process.exitCode=1;}}
+if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){try{await fetchGceSecrets();console.info('2つの秘密情報を一時メモリへ読み込みました');}catch{console.error('秘密情報の読み込みを拒否しました。秘密値は表示していません');process.exitCode=1;}}

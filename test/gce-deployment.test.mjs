@@ -29,9 +29,19 @@ function fake({identityWrong=false,versionWrong=false,crcWrong=false,invalidAuth
  };
  return {calls,writes,fetchImpl,writeSecret:async(name,bytes)=>{writes.push({name,bytes});}};
 }
+function withPinnedVersions(fn){
+ const keys=['MCP_DISCORD_BOT_SECRET_VERSION','MCP_AUTH_SECRET_VERSION'],saved=keys.map(k=>process.env[k]);
+ process.env.MCP_DISCORD_BOT_SECRET_VERSION='2';process.env.MCP_AUTH_SECRET_VERSION='1';
+ return Promise.resolve().then(fn).finally(()=>{keys.forEach((k,i)=>{saved[i]===undefined?delete process.env[k]:process.env[k]=saved[i];});});
+}
 test('VM専用シークレットローダーはペア公開前にID・正確なバージョン・CRCを検証する。フェイクI/Oのみ',async()=>{
- const f=fake();assert.deepEqual(await fetchGceSecrets(f),{loaded:true,pinnedVersionsVerified:true});assert.deepEqual(f.writes.map(x=>x.name),['bot-token','auth.json']);assert.equal(f.calls.length,4);assert(f.calls.every(x=>x.options.redirect==='error'));assert(f.calls[2].url.endsWith('/versions/2:access'));assert(f.calls[3].url.endsWith('/versions/1:access'));
+ await withPinnedVersions(async()=>{const f=fake();assert.deepEqual(await fetchGceSecrets(f),{loaded:true,versionsVerified:true});assert.deepEqual(f.writes.map(x=>x.name),['bot-token','auth.json']);assert.equal(f.calls.length,4);assert(f.calls.every(x=>x.options.redirect==='error'));assert(f.calls[2].url.endsWith('/versions/2:access'));assert(f.calls[3].url.endsWith('/versions/1:access'));});
+});
+test('VM専用シークレットローダーはlatest指定で解決済みバージョンを受理する',async()=>{
+ delete process.env.MCP_DISCORD_BOT_SECRET_VERSION;delete process.env.MCP_AUTH_SECRET_VERSION;
+ const f=fake();assert.deepEqual(await fetchGceSecrets(f),{loaded:true,versionsVerified:true});assert(f.calls[2].url.endsWith('/versions/latest:access'));assert(f.calls[3].url.endsWith('/versions/latest:access'));
+ const wrong=fake({identityWrong:true});await assert.rejects(fetchGceSecrets(wrong));assert.equal(wrong.writes.length,0);
 });
 test('VM専用シークレットローダーは誤ったID/バージョン/チェックサム/材料を書き込み・非公開エラーなしで拒否する',async()=>{
- for(const options of [{identityWrong:true},{versionWrong:true},{crcWrong:true},{invalidAuth:true}]){const f=fake(options);await assert.rejects(fetchGceSecrets(f),error=>{assert(!error.message.includes('FAKE'));assert(!error.message.includes('projects/'));return true;});assert.equal(f.writes.length,0);}
+ await withPinnedVersions(async()=>{for(const options of [{identityWrong:true},{versionWrong:true},{crcWrong:true},{invalidAuth:true}]){const f=fake(options);await assert.rejects(fetchGceSecrets(f),error=>{assert(!error.message.includes('FAKE'));assert(!error.message.includes('projects/'));return true;});assert.equal(f.writes.length,0);}});
 });

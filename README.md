@@ -26,7 +26,7 @@ npm test
 
 1. `/opt/discord-mcp` にソースと本番依存をインストールし、Node を `/usr/local/bin/node` で利用可能にする。非特権の `discord-mcp` ユーザーを作成する。`/var/lib/discord-mcp` はそのユーザー専用にし、再起動を越えて保持する。
 2. `deployment/gce/runtime.env.example` をもとに、root が読める `/etc/discord-mcp/runtime.env` を作る。自身の `GCE_DISCORD_ORIGIN`、`DISCORD_GUILD_ID`、`DISCORD_BOT_ID`、Google Web クライアント ID、Google が権威を持つオーナーメール、厳密なコネクタリダイレクト URI を設定する。HTTPS オリジンを Google Web クライアントに登録する。`guild-visible` は bot の既存の可視範囲に従う。`allowlist` は追加で `DISCORD_CHANNEL_IDS`（JSON 配列）を必須とする。
-3. Discord bot トークンと、別の OAuth 署名/クッキー JSON ドキュメントを systemd クレデンシャル経由で供給する。ドキュメントには `cookieKeys`（少なくとも 32 バイトのランダム文字列の配列）と `jwks.keys`（2048 ビット以上の秘密 RSA JWK オブジェクトの配列）が必要。実値はチェックアウト外に保存する。任意の `discord-mcp-secrets.service` は VM のIDを使って固定済み Secret Manager バージョンを読み込む。`MCP_*` 設定を構成し、その ID には 2 つのシークレットへのアクセスのみ許可する。サービスアカウントのキーファイルは使わない。
+3. Discord bot トークンと、別の OAuth 署名/クッキー JSON ドキュメントを systemd クレデンシャル経由で供給する。ドキュメントには `cookieKeys`（少なくとも 32 バイトのランダム文字列の配列）と `jwks.keys`（2048 ビット以上の秘密 RSA JWK オブジェクトの配列）が必要。実値はチェックアウト外に保存する。任意の `discord-mcp-secrets.service` は VM のIDを使って Secret Manager の指定バージョンを読み込む。`latest` を指定するとローテーション後の再起動で新しいバージョンに追従する。`MCP_*` 設定を構成し、その ID には 2 つのシークレットへのアクセスのみ許可する。サービスアカウントのキーファイルは使わない。
 4. `deployment/gce/` の 2 つのユニット例を systemd にインストールする。別のクレデンシャルプロバイダを使う場合は、`/run/discord-mcp-secrets/` の 2 つのクレデンシャルファイルを維持したままシークレットローダーユニットを差し替える。nginx には有効な証明書を用意し、`@@HOST@@` プレースホルダをレンダリングして、プロキシスニペットとタイミングログ形式をインストールする。HTTPS 例にあるルートのみを公開する。MCP と OAuth は HTTPS を使わなければならない。
 5. 準備済みホストを `sudo systemctl daemon-reload` と `sudo systemctl enable --now discord-mcp.service` で起動する。ユニットはプロセスロックの下で `npm start` 相当を実行し、Node を `127.0.0.1:8080` にバインドし、クレデンシャルディレクトリを供給する。`/healthz` を確認してから、コンシューマを `https://<your-host>/mcp/discord` に接続し、対象ギルドの `discord.mention.created` を購読する。
 
@@ -51,3 +51,26 @@ npm run deploy                # アップロード + インストール + ヘル
 ```
 
 `.github/workflows/` は push ごとに `check`+`test` を実行し（ci）、グリーンになった `main` を Workload Identity Federation 経由でデプロイする（cd）。`production` environment は `.env` と同じ名前の値を持つ： secrets の `GCP_WIF_PROVIDER`、`GCP_DEPLOY_SA`（どちらも Terraform の output）、`DISCORD_GUILD_ID`、`DISCORD_BOT_ID`、および残りの variables。
+
+WIF プロバイダの `attribute_condition` は GitHub OIDC トークンの `repository` クレームを `github_repo` 変数と照合する。つまりデプロイを許可されるのは tfvars で指定したリポジトリの Actions のみであり、fork で動かす場合は `github_repo` をその fork の `owner/name` に合わせる必要がある。
+
+`production` environment とその値は `gh` CLI で作成できる（`-R` は自分のリポジトリを指定）:
+
+```sh
+gh api repos/<owner>/<repo>/environments/production -X PUT
+
+gh variable set DEPLOY_HOST --env production -b "<ホスト名>"
+gh variable set DEPLOY_GOOGLE_CLIENT_ID --env production -b "<OAuth クライアント ID>"
+gh variable set DEPLOY_CHANNEL_IDS --env production -b '[]'
+gh variable set DEPLOY_PROJECT --env production -b "<GCP プロジェクト ID>"
+gh variable set DEPLOY_PROJECT_NUMBER --env production -b "<プロジェクト番号>"
+gh variable set DEPLOY_ZONE --env production -b "<ゾーン>"
+gh variable set DEPLOY_INSTANCE --env production -b "<インスタンス名>"
+gh variable set DEPLOY_NODE_VERSION --env production -b "22.23.3"
+gh variable set GOOGLE_ALLOWED_EMAIL --env production -b "<オーナーのメール>"
+
+gh secret set GCP_WIF_PROVIDER --env production -b "$(terraform -chdir=infra output -raw wif_provider)"
+gh secret set GCP_DEPLOY_SA --env production -b "$(terraform -chdir=infra output -raw deploy_service_account)"
+gh secret set DISCORD_GUILD_ID --env production -b "<ギルド ID>"
+gh secret set DISCORD_BOT_ID --env production -b "<bot の Application ID>"
+```
