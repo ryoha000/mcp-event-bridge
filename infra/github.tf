@@ -34,6 +34,13 @@ resource "google_service_account_iam_member" "deploy_wif" {
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${var.github_repo}"
 }
 
+# OS Login ではインスタンスの SA に対する actAs（鍵の署名）が必要。
+resource "google_service_account_iam_member" "deploy_vm_sa_user" {
+  service_account_id = google_service_account.vm.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.deploy.email}"
+}
+
 # OS Login では gcloud が SA 経由で短期 SSH 鍵に署名することがある。
 resource "google_service_account_iam_member" "deploy_self_token" {
   service_account_id = google_service_account.deploy.name
