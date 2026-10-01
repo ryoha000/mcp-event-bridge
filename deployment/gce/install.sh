@@ -56,7 +56,10 @@ if [ "$PREV" != "$REVISION" ]; then
   if [ -d "$APP" ]; then mv "$APP" "$APP.prev"; fi
   mv "$APP.new" "$APP"
   printf '%s\n' "$REVISION" > "$APP/.revision"
-  if [ ! -f "$APP.prev/package-lock.json" ] || ! cmp -s "$APP/package-lock.json" "$APP.prev/package-lock.json"; then
+  # node_modules はアーカイブに含まれない。lock が同じなら前リビジョンから引き継ぐ。
+  if [ -f "$APP.prev/package-lock.json" ] && cmp -s "$APP/package-lock.json" "$APP.prev/package-lock.json" && [ -d "$APP.prev/node_modules" ]; then
+    mv "$APP.prev/node_modules" "$APP/node_modules"
+  else
     (cd "$APP" && npm ci --omit=dev --ignore-scripts)
   fi
   APP_CHANGED=1

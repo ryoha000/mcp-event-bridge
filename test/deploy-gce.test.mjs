@@ -59,5 +59,6 @@ test('リモートインストーラはシークレットを含まず冪等で�
  assert(sh.includes('127.0.0.1:8080/healthz'));
  assert(sh.includes('APP_CHANGED'));
  assert(sh.includes('nginx-bootstrap.conf'));
+ assert(sh.includes('node_modules')); // アーカイブに含まれないため引継ぎかnpm ciが必須
  assert(!sh.includes('LoadCredential='));
 });
