@@ -9,8 +9,8 @@ import {createRequestListener} from './server.mjs';
 import {memoryStore} from './lib/store.mjs';
 import {AsyncLocalStorage} from 'node:async_hooks';
 import {randomUUID} from 'node:crypto';
-// 旧ブリッジのHTTP呼び出し、レシーバースプール、ポーリング用ナンス、第2送信台帳は使わない。
-// 新しいissuer/状態はこのインスタンスに属し、旧プローブ/コンシューマの許可(grant)はそのまま残る。
+// Gateway はこのプロセス内で保持し、外部ブリッジや別プロセスのスプールは存在しない。
+// issuer/状態はこのインスタンスに属し、旧プローブ/コンシューマの許可(grant)はそのまま残る。
 export async function createConsolidatedRuntime({backend,auth,resource,channelIds,token,sendMessage,transport,repliesEnabled=false,gatewayFactory=createDiscordGateway,gatewayOwnership='durable-lease',gatewaySessionKey='consolidated-gateway:v1',authorizeSubscription,now=Date.now,timers={setTimeout,clearTimeout},onError=()=>{},onFatal=()=>{},onGatewayState=()=>{},reaction,onTiming=()=>{},inlineMentions=false,channelScope='allowlist'}){
  if(backend?.durable!==true||!resource?.endsWith('/mcp/discord')||!auth)throw Error('Consolidated runtime configuration refused');
  const store=createEventStore({backend,retention:discordRetention,requireLiveSubscription:true,now});
@@ -18,7 +18,7 @@ export async function createConsolidatedRuntime({backend,auth,resource,channelId
  const requestContext=new AsyncLocalStorage(),timing=(phase,details)=>{try{onTiming(phase,details);}catch{}};
  const authorize=authorizeSubscription??createSubscriptionAuthorizer({backend,resource});
  const worker=createLocalEventWorker({store,adapter,transport,authorizeSubscription:authorize,repliesEnabled,now,timers,onError,onTiming:timing});
- const events=createEventService({store,adapters:[adapter],transport,queueReplies:true,authorizeQueuedReply:authorize,subscriptionTtlMs:8*3600000,diagnosticSink:()=>{},statusConfiguration:{channelAllowlistCount:channelScope==='allowlist'?channelIds.length:null,channelAccessPolicy:channelScope,receiverRoutesEnabled:false,workloadAuthEnabled:false,replyExecution:'queued_locally',mechanicalEyesEnabled:!!reaction,inlineMentionPayload:inlineMentions}});
+ const events=createEventService({store,adapters:[adapter],transport,queueReplies:true,authorizeQueuedReply:authorize,subscriptionTtlMs:8*3600000,diagnosticSink:()=>{},statusConfiguration:{channelAllowlistCount:channelScope==='allowlist'?channelIds.length:null,channelAccessPolicy:channelScope,replyExecution:'queued_locally',mechanicalEyesEnabled:!!reaction,inlineMentionPayload:inlineMentions}});
  let stopped=false,pressureTimer,releasePressure;
  const gateway=gatewayFactory({token,backend,sessionKey:gatewaySessionKey,ownership:gatewayOwnership,leaseMs:900000,leaseRenewalMs:300000,onState:onGatewayState,now,timers,
   onDispatch:async(packet,metadata={})=>{
@@ -37,7 +37,7 @@ export async function createConsolidatedRuntime({backend,auth,resource,channelId
      await new Promise(done=>{releasePressure=done;pressureTimer=timers.setTimeout(done,15000);});
     }
    }
-   throw Error('Consolidated receiver stopped before durable ingest');
+   throw Error('Consolidated runtime stopped before durable ingest');
   },onFatal:()=>{stop();try{onFatal();}catch{}}});
  function stop(){stopped=true;timers.clearTimeout(pressureTimer);releasePressure?.();worker.stop();gateway.stop();}
  const listener=createRequestListener({auth:{...auth,discordConsumerEnabled:true},store:memoryStore(),handlerFactory:probe=>{
@@ -57,7 +57,7 @@ export async function createConsolidatedRuntime({backend,auth,resource,channelId
  }});
  const requestListener=async(req,res)=>{
   const path=new URL(req.url,'https://routing.invalid').pathname;
-  if(path==='/mcp'||path.startsWith('/receiver/')||path.startsWith('/ingest/')){res.writeHead(404);res.end();return;}
+  if(path==='/mcp'){res.writeHead(404);res.end();return;}
   if(stopped){res.writeHead(503);res.end();return;}
   if(path===new URL(resource).pathname){const requestTrace=randomUUID(),began=performance.now();res.setHeader('X-Discord-Trace',requestTrace);timing('mcp_request_received',{requestTrace});res.once('finish',()=>timing('mcp_request_completed',{requestTrace,httpStatus:res.statusCode,durationMs:performance.now()-began}));await requestContext.run({requestTrace},()=>listener(req,res));}
   else await listener(req,res);

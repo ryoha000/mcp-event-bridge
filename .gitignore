@@ -5,16 +5,12 @@ node_modules/
 *.sqlite*
 *.db*
 *.secret*
-*.dpapi
 *.pem
 *.key
 *.zip
 *.tar.gz
 __pycache__/
-.local-secrets/
-.receiver-state/
 .gce-ssh/
-receiver-config.json
 runtime.env
 deployment/gce/live/
 deployment/gce/rendered/

@@ -5,12 +5,8 @@ node_modules
 *.sqlite*
 *.db*
 *.secret*
-*.dpapi
 *.pem
 *.key
-.local-secrets
-.receiver-state
 .gce-ssh
-receiver-config.json
 deployment/gce/live
 deployment/gce/rendered

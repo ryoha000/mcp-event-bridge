@@ -7,7 +7,7 @@ import {createGcsObjectBackend} from './lib/gcs-store.mjs';
 import {createOAuth} from './lib/oauth.mjs';
 import {createDiscordRest} from './lib/adapters/discord-rest.mjs';
 import {readDiscordChannels} from './lib/adapters/discord.mjs';
-import {validateDiscordReceiver,receiverDiagnostic} from './lib/adapters/discord-preflight.mjs';
+import {validateDiscordIntegration,discordDiagnostic} from './lib/adapters/discord-preflight.mjs';
 import {createDiscordCallbackTransport} from './lib/events/callback-transport.mjs';
 import {createConsolidatedRuntime} from './consolidated-runtime.mjs';
 
@@ -19,15 +19,15 @@ export async function prepareConsolidatedServer(env,dependencies={}){
  if(env.CONSOLIDATED_BUCKET!=='discord-receiver-state-123456789012-uswest1')throw Error('Separate receiver state bucket required');
  if(env.CONSOLIDATED_AUTH_SECRET_FILE!=='/var/run/secrets/discord-auth/secret.json')throw Error('Dedicated Discord auth-secret mount required');
  if(env.CONSOLIDATED_REPLIES_ENABLE!==undefined&&!['true','false'].includes(env.CONSOLIDATED_REPLIES_ENABLE))throw Error('Explicit reply gate required');
- const config=await (dependencies.readConfig??readProductionConfig)({...env,PROBE_ORIGIN:publicOrigin.origin,PROBE_BUCKET:env.CONSOLIDATED_BUCKET,PROBE_AUTH_SECRET_FILE:env.CONSOLIDATED_AUTH_SECRET_FILE,DISCORD_ENABLE:'true',DISCORD_RECEIVER_ENABLE:'false',DISCORD_UNATTENDED_ENABLE:'true'});
+ const config=await (dependencies.readConfig??readProductionConfig)({...env,PROBE_ORIGIN:publicOrigin.origin,PROBE_BUCKET:env.CONSOLIDATED_BUCKET,PROBE_AUTH_SECRET_FILE:env.CONSOLIDATED_AUTH_SECRET_FILE,DISCORD_ENABLE:'true',DISCORD_UNATTENDED_ENABLE:'true'});
  const backend=dependencies.backend??createGcsObjectBackend({bucketName:env.CONSOLIDATED_BUCKET,prefix:'discord-consolidated/v1/',maxBytes:1024*1024,maxAttempts:5});
  const resource=publicOrigin.origin+'/mcp/discord';
  const auth=dependencies.auth??createOAuth({config:{...config,origin:publicOrigin.origin+'/discord',resource,discordConsumerOnly:true},backend});
  const channelIds=readDiscordChannels(env);
  const token=(await (dependencies.readSecret??readFile)('/var/run/secrets/discord-bot/token','utf8')).trim();
- await (dependencies.validateDiscord??validateDiscordReceiver)({token,channelIds});
+ await (dependencies.validateDiscord??validateDiscordIntegration)({token,channelIds});
  return createConsolidatedRuntime({backend,auth,resource,channelIds,token,sendMessage:dependencies.sendMessage??createDiscordRest({token}),transport:dependencies.transport??createDiscordCallbackTransport(),repliesEnabled:env.CONSOLIDATED_REPLIES_ENABLE==='true',
-  ...(dependencies.gatewayFactory?{gatewayFactory:dependencies.gatewayFactory}:{}),...(dependencies.timers?{timers:dependencies.timers}:{}),onError:()=>console.error('Consolidated work paused; durable state retained'),onGatewayState:(state,code)=>receiverDiagnostic('gateway_'+state,{gatewayCode:code,repliesEnabled:env.CONSOLIDATED_REPLIES_ENABLE==='true'}),onFatal:dependencies.onFatal??(()=>{process.exitCode=1;})});
+  ...(dependencies.gatewayFactory?{gatewayFactory:dependencies.gatewayFactory}:{}),...(dependencies.timers?{timers:dependencies.timers}:{}),onError:()=>console.error('Consolidated work paused; durable state retained'),onGatewayState:(state,code)=>discordDiagnostic('gateway_'+state,{gatewayCode:code,repliesEnabled:env.CONSOLIDATED_REPLIES_ENABLE==='true'}),onFatal:dependencies.onFatal??(()=>{process.exitCode=1;})});
 }
 async function main(){
  let runtime,server;const terminate=async()=>{runtime?.stop();server?.close();const timer=setTimeout(()=>process.exit(process.exitCode??0),8000);timer.unref();try{await runtime?.shutdown();}catch{process.exitCode=1;}};

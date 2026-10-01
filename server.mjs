@@ -13,7 +13,7 @@ export function assertAuth(auth) {
 }
 // 呼び出し側が制御できるIDヘッダは一切信用しない。OAuthアダプタは
 // audience/scope/有効期限の検査の後、検証済み issuer+subject の安定したオーナーIDを返す。
-export function createRequestListener({auth, store, transport = callbackTransport, handlerFactory, ingestEvent, receiverRequest}) {
+export function createRequestListener({auth, store, transport = callbackTransport, handlerFactory}) {
   assertAuth(auth); assertStore(store);
   const probe = createHandler(store, transport);
   const handle = handlerFactory ? handlerFactory(probe) : probe;
@@ -22,9 +22,7 @@ export function createRequestListener({auth, store, transport = callbackTranspor
       if (req.url === '/healthz' && req.method === 'GET') { json(res, 200, {ok:true}); return; }
       if (await auth.handleHttp(req, res)) return;
       const discordConsumer=req.url==='/mcp/discord'&&auth.discordConsumerEnabled===true;
-      const ingest=req.url==='/ingest/discord'&&typeof ingestEvent==='function';
-      const receiver=typeof receiverRequest==='function'&&['/receiver/discord/claim','/receiver/discord/receipt','/receiver/discord/drain'].includes(req.url);
-      if (req.url !== '/mcp'&&!discordConsumer&&!ingest&&!receiver) { json(res, 404, {error:'Not found'}); return; }
+      if (req.url !== '/mcp'&&!discordConsumer) { json(res, 404, {error:'Not found'}); return; }
       // ディスカバリにも認証を要求する。メタデータは auth アダプタ経由で提供する。
       const principal = await auth.authenticate(req);
       if (!principal || typeof principal.owner !== 'string' || !principal.owner || principal.owner.length > 512) {
@@ -41,10 +39,6 @@ export function createRequestListener({auth, store, transport = callbackTranspor
       }
       let body;
       try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { json(res, 400, {error:'Invalid JSON'}); return; }
-      if(ingest){
-        try{const result=await ingestEvent(principal,body);json(res,200,result);}catch(error){const status=error.code==='EVENT_SCOPE'?403:error.code==='EVENT_INPUT'?400:error.code==='EVENT_EXPIRED'?409:503;json(res,status,{error:status===503?'Ingest paused; retry durable event':'Ingest refused'});}return;
-      }
-      if(receiver){try{json(res,200,await receiverRequest(principal,req.url.split('/').at(-1),body));}catch(error){json(res,error.code==='EVENT_SCOPE'?403:error.code==='EVENT_INPUT'?400:503,{error:'Receiver request paused'});}return;}
       if (!body || Array.isArray(body) || body.jsonrpc !== '2.0' || typeof body.method !== 'string' ||
           (body.id !== undefined && body.id !== null && typeof body.id !== 'string' && typeof body.id !== 'number') ||
           (body.params !== undefined && (!body.params || typeof body.params !== 'object' || Array.isArray(body.params)))) {

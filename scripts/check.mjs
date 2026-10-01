@@ -8,4 +8,4 @@ async function walk(dir) {
   }
 }
 function check(path) { const r=spawnSync(process.execPath,['--check',path],{stdio:'inherit'});if(r.status!==0)process.exit(r.status??1); }
-await walk('lib');await walk('scripts');check('server.mjs');check('production.mjs');check('pc-receiver.mjs');check('cloud-receiver.mjs');check('consolidated-runtime.mjs');check('consolidated-server.mjs');check('gce-server.mjs');
+await walk('lib');await walk('scripts');check('server.mjs');check('production.mjs');check('consolidated-runtime.mjs');check('consolidated-server.mjs');check('gce-server.mjs');

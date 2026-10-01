@@ -9,7 +9,7 @@ import {createOAuth} from './lib/oauth.mjs';
 import {createConsolidatedRuntime} from './consolidated-runtime.mjs';
 import {readDiscordChannelPolicy} from './lib/adapters/discord.mjs';
 import {createDiscordRest} from './lib/adapters/discord-rest.mjs';
-import {validateDiscordReceiver,receiverDiagnostic} from './lib/adapters/discord-preflight.mjs';
+import {validateDiscordIntegration,discordDiagnostic} from './lib/adapters/discord-preflight.mjs';
 import {createDiscordCallbackTransport} from './lib/events/callback-transport.mjs';
 import {createDiscordEyes} from './lib/adapters/discord-reaction.mjs';
 import {createTimingSink} from './lib/events/timing.mjs';
@@ -25,12 +25,12 @@ export async function prepareGceServer(env,dependencies={}){
  const backend=dependencies.backend??createSqliteObjectBackend({filename:env.GCE_DISCORD_SQLITE_FILE});
  if(backend?.localSingleton!==true)throw Error('SQLite process lock required');
  try{
-  const config=await(dependencies.readConfig??readProductionConfig)({...env,PROBE_ORIGIN:origin.origin,PROBE_BUCKET:'local-placeholder-unused',PROBE_AUTH_SECRET_FILE:env.CREDENTIALS_DIRECTORY+'/auth.json',DISCORD_ENABLE:'true',DISCORD_RECEIVER_ENABLE:'false',DISCORD_UNATTENDED_ENABLE:'true'});
+  const config=await(dependencies.readConfig??readProductionConfig)({...env,PROBE_ORIGIN:origin.origin,PROBE_BUCKET:'local-placeholder-unused',PROBE_AUTH_SECRET_FILE:env.CREDENTIALS_DIRECTORY+'/auth.json',DISCORD_ENABLE:'true',DISCORD_UNATTENDED_ENABLE:'true'});
   const resource=origin.origin+'/mcp/discord',auth=dependencies.auth??createOAuth({config:{...config,origin:origin.origin+'/discord',resource,discordConsumerOnly:true},backend});
   const {channelIds,channelScope}=readDiscordChannelPolicy(env),token=(await(dependencies.readSecret??readFile)(env.CREDENTIALS_DIRECTORY+'/bot-token','utf8')).trim();
-  await(dependencies.validateDiscord??validateDiscordReceiver)({token,channelIds,channelScope});
+  await(dependencies.validateDiscord??validateDiscordIntegration)({token,channelIds,channelScope});
   const onTiming=dependencies.onTiming??createTimingSink(),reaction=dependencies.reaction??createDiscordEyes({token,channelIds,channelScope,onTiming});
-  const runtime=await createConsolidatedRuntime({backend,auth,resource,channelIds,channelScope,token,reaction,onTiming,inlineMentions:true,gatewayOwnership:'local-singleton',gatewaySessionKey:'gce-gateway:v1',sendMessage:dependencies.sendMessage??createDiscordRest({token,onTiming}),transport:dependencies.transport??createDiscordCallbackTransport(),repliesEnabled:env.GCE_DISCORD_REPLIES_ENABLE==='true',...(dependencies.gatewayFactory?{gatewayFactory:dependencies.gatewayFactory}:{}),...(dependencies.timers?{timers:dependencies.timers}:{}),onError:()=>console.error('保存済み状態を保持して処理を一時停止しました'),onGatewayState:(state,code)=>receiverDiagnostic('gateway_'+state,{gatewayCode:code,repliesEnabled:env.GCE_DISCORD_REPLIES_ENABLE==='true'}),onFatal:dependencies.onFatal??(()=>{process.exitCode=1;})});
+  const runtime=await createConsolidatedRuntime({backend,auth,resource,channelIds,channelScope,token,reaction,onTiming,inlineMentions:true,gatewayOwnership:'local-singleton',gatewaySessionKey:'gce-gateway:v1',sendMessage:dependencies.sendMessage??createDiscordRest({token,onTiming}),transport:dependencies.transport??createDiscordCallbackTransport(),repliesEnabled:env.GCE_DISCORD_REPLIES_ENABLE==='true',...(dependencies.gatewayFactory?{gatewayFactory:dependencies.gatewayFactory}:{}),...(dependencies.timers?{timers:dependencies.timers}:{}),onError:()=>console.error('保存済み状態を保持して処理を一時停止しました'),onGatewayState:(state,code)=>discordDiagnostic('gateway_'+state,{gatewayCode:code,repliesEnabled:env.GCE_DISCORD_REPLIES_ENABLE==='true'}),onFatal:dependencies.onFatal??(()=>{process.exitCode=1;})});
   let shutdown;return {...runtime,backend,shutdown(){return shutdown??=(async()=>{try{await runtime.shutdown();}finally{backend.close();}})();}};
  }catch(error){backend.close();throw error;}
 }

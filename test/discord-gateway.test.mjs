@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import {createDiscordGateway} from '../lib/adapters/discord-gateway.mjs';
 import {BOT_ID} from '../lib/adapters/discord.mjs';
 import {createDiscordRest} from '../lib/adapters/discord-rest.mjs';
-import {startPcReceiver} from '../pc-receiver.mjs';
 
 function fixture({dispatch=async()=>{},saved=null}={}) {
   let stored=saved,at=1000;
@@ -75,10 +74,9 @@ test('RESTは固定Discord APIを使い、リダイレクト/リトライを無�
   await assert.rejects(send('../dm',{content:'test'}));assert.equal(calls.length,1);
   const mismatch=createDiscordRest({token:'FAKE-TEST-TOKEN',fetchImpl:async()=>new Response(JSON.stringify({id:'100000000000000200',channel_id:'100000000000002500'}))});await assert.rejects(mismatch('100000000000002200',{}));
 });
-test('RESTは拒否を返し応答バイトを制限する。Gatewayは未承認の起動を拒否する',async()=>{
+test('RESTは拒否を返し応答バイトを制限する',async()=>{
   const denied=createDiscordRest({token:'FAKE-TEST-TOKEN',fetchImpl:async()=>new Response('{}',{status:429})});assert.equal((await denied('100000000000002200',{})).ok,false);
   const large=createDiscordRest({token:'FAKE-TEST-TOKEN',fetchImpl:async()=>new Response('x'.repeat(65537))});await assert.rejects(large('100000000000002200',{}));
-  await assert.rejects(startPcReceiver({}));await assert.rejects(startPcReceiver({enabled:false}));
 });
 test('永続identify予算はDiscordグローバル上限より先に再接続ストームを止める',async()=>{
   const f=fixture({saved:{version:1,session:null,holder:null,until:0,identify:{windowStart:0,count:100,lastAt:0}}});await f.gateway.start();f.sockets[0].emit({op:10,d:{heartbeat_interval:40000}});await f.gateway.flush();assert.equal(f.sockets[0].sent.length,0);assert.equal(f.fatal.length,1);
