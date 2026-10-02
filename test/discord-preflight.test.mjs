@@ -23,7 +23,7 @@ test('ランタイムプレフライトは誤ったbot・誤ったguild/channel�
 });
 test('診断はcontent/identity/tokenフィールドを除外し、失敗するシンクを無視する',()=>{
  const row=discordDiagnostic('gateway_ready',{token:'PRIVATE',botId:'PRIVATE',body:'PRIVATE',repliesEnabled:false,gatewayCode:4014,code:'PRIVATE'},()=>{throw Error('PRIVATE');});
- assert.deepEqual(row,{kind:'discord_diagnostic',phase:'gateway_ready',repliesEnabled:false,gatewayCode:4014});
+ assert.deepEqual(row,{kind:'discord_diagnostic',phase:'gateway_ready',gatewayCode:4014});
 });
 
 test('guild-visibleプレフライトは既存の固定bot/guildメタデータのみ使い、静的ID・チャンネル列挙・メッセージ読み取り・権限書き込みをしない',async()=>{

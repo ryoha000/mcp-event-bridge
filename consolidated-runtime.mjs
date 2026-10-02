@@ -11,13 +11,13 @@ import {AsyncLocalStorage} from 'node:async_hooks';
 import {randomUUID} from 'node:crypto';
 // Gateway はこのプロセス内で保持し、外部ブリッジや別プロセスのスプールは存在しない。
 // issuer/状態はこのインスタンスに属し、旧プローブ/コンシューマの許可(grant)はそのまま残る。
-export async function createConsolidatedRuntime({backend,auth,resource,channelIds,token,sendMessage,transport,repliesEnabled=false,gatewayFactory=createDiscordGateway,gatewayOwnership='durable-lease',gatewaySessionKey='consolidated-gateway:v1',authorizeSubscription,now=Date.now,timers={setTimeout,clearTimeout},onError=()=>{},onFatal=()=>{},onGatewayState=()=>{},reaction,onTiming=()=>{},inlineMentions=false,channelScope='allowlist'}){
+export async function createConsolidatedRuntime({backend,auth,resource,channelIds,token,sendMessage,transport,gatewayFactory=createDiscordGateway,gatewayOwnership='durable-lease',gatewaySessionKey='consolidated-gateway:v1',authorizeSubscription,now=Date.now,timers={setTimeout,clearTimeout},onError=()=>{},onFatal=()=>{},onGatewayState=()=>{},reaction,onTiming=()=>{},inlineMentions=false,channelScope='allowlist'}){
  if(backend?.durable!==true||!resource?.endsWith('/mcp/discord')||!auth)throw Error('Consolidated runtime configuration refused');
  const store=createEventStore({backend,retention:discordRetention,requireLiveSubscription:true,now});
  const adapter=createDiscordAdapter({channelIds,sendMessage,inlineMentions,channelScope});
  const requestContext=new AsyncLocalStorage(),timing=(phase,details)=>{try{onTiming(phase,details);}catch{}};
  const authorize=authorizeSubscription??createSubscriptionAuthorizer({backend,resource});
- const worker=createLocalEventWorker({store,adapter,transport,authorizeSubscription:authorize,repliesEnabled,now,timers,onError,onTiming:timing});
+ const worker=createLocalEventWorker({store,adapter,transport,authorizeSubscription:authorize,now,timers,onError,onTiming:timing});
  const events=createEventService({store,adapters:[adapter],transport,queueReplies:true,authorizeQueuedReply:authorize,subscriptionTtlMs:8*3600000,diagnosticSink:()=>{},statusConfiguration:{channelAllowlistCount:channelScope==='allowlist'?channelIds.length:null,channelAccessPolicy:channelScope,replyExecution:'queued_locally',mechanicalEyesEnabled:!!reaction,inlineMentionPayload:inlineMentions}});
  let stopped=false,pressureTimer,releasePressure;
  const gateway=gatewayFactory({token,backend,sessionKey:gatewaySessionKey,ownership:gatewayOwnership,leaseMs:900000,leaseRenewalMs:300000,onState:onGatewayState,now,timers,

@@ -6,15 +6,16 @@ import {prepareConsolidatedServer} from '../consolidated-server.mjs';
 import {createDiscordGateway} from '../lib/adapters/discord-gateway.mjs';
 import {BOT_ID,GUILD_ID} from '../lib/adapters/discord.mjs';
 import {createDiscordEyes} from '../lib/adapters/discord-reaction.mjs';
+import {digest} from '../lib/events/envelope.mjs';
 
 const channel='100000000000000600',owner='google:fixture',resource='https://consolidated.example/mcp/discord';
 const principal={owner,clientId:'fake-client',grantId:'fake-grant',grantExpiresAt:Date.now()+86400000,resource,scopes:['discord:read','discord:reply']};
 function memory(){const data=new Map(),counts={reads:0,writes:0};return {durable:true,data,counts,async read(k){counts.reads++;return structuredClone(data.get(k)??null);},async update(k,fn){counts.reads++;const next=fn(structuredClone(data.get(k)??null));if(Object.hasOwn(next,'value')){counts.writes++;data.set(k,structuredClone(next.value));}return next.result;}};}
-async function fixture(t,{backend=memory(),repliesEnabled=true,sendMessage,authorizeSubscription=async()=>true,transport,reaction,onTiming,inlineMentions=false,channelScope='allowlist'}={}){
+async function fixture(t,{backend=memory(),sendMessage,authorizeSubscription=async()=>true,transport,reaction,onTiming,inlineMentions=false,channelScope='allowlist'}={}){
  await backend.update('google-owner:v1',()=>({value:{sub:'fixture'}}));
  let at=Date.now(),gatewayOptions,clockId=0;const tasks=new Map(),sends=[],callbacks=[];
  const timers={setTimeout:(fn,delay)=>{tasks.set(++clockId,{fn,delay});return clockId;},clearTimeout:id=>tasks.delete(id)};
- const runtime=await createConsolidatedRuntime({backend,resource,token:'FAKE',channelIds:[channel],channelScope,repliesEnabled,authorizeSubscription,now:()=>at,timers,reaction,onTiming,inlineMentions,
+ const runtime=await createConsolidatedRuntime({backend,resource,token:'FAKE',channelIds:[channel],channelScope,authorizeSubscription,now:()=>at,timers,reaction,onTiming,inlineMentions,
   auth:{productionReady:true,challenge:'Bearer fixture',authenticate:async()=>principal,handleHttp:async()=>false},
   gatewayFactory:options=>{gatewayOptions=options;return {start:async()=>{},stop(){},release:async()=>{}};},
   sendMessage:sendMessage??(async(id,body)=>{sends.push({id,body});return {ok:true,messageId:'100000000000002000'};}),
@@ -70,9 +71,9 @@ test('guild-visibleの権限拒否はDiscord権限を拡大せず、イベント
  const f=await fixture(t,{channelScope:'guild-visible',reaction:eyes,sendMessage:async()=>{sends++;return {ok:false,status:403};}});await f.subscribe();await f.runtime.worker.flush();const p=f.packet();p.d.channel_id='100000000000002100';await f.gatewayOptions.onDispatch(p);await f.runtime.worker.flush();await new Promise(done=>setImmediate(done));assert.equal(reactions,1);assert.equal(eyes.statistics().failed,1);assert.equal(f.callbacks.length,2);
  const id=JSON.parse(f.callbacks[1].body).data.event_id;await f.rpc('tools/call',{name:'discord_reply_to_event',arguments:{event_id:id,content:'fake'}});await f.runtime.worker.flush();assert.equal((await f.runtime.store.status(owner)).replies[0].status,'rejected');await f.rpc('tools/call',{name:'discord_reply_to_event',arguments:{event_id:id,content:'fake'}});await f.runtime.worker.flush();assert.equal(sends,1);
 });
-test('返信ゲートはアイドルタイマーなしで永続コマンドを1件保持し、再起動で保留作業を1回だけ解放する',async t=>{
- const f=await fixture(t,{repliesEnabled:false});await f.subscribe();await f.runtime.worker.flush();await f.dispatch();const eventId=JSON.parse(f.callbacks[1].body).data.event_id;
- await f.rpc('tools/call',{name:'discord_reply_to_event',arguments:{event_id:eventId,content:'held fake reply'}});await f.runtime.worker.flush();assert.equal(f.sends.length,0);assert.equal(f.tasks.size,0);
+test('ワーカーに通知されず永続化されたコマンドは、再起動で保留作業を1回だけ解放する',async t=>{
+ const f=await fixture(t);await f.subscribe();await f.runtime.worker.flush();await f.dispatch();const eventId=JSON.parse(f.callbacks[1].body).data.event_id;
+ await f.runtime.store.claimReply(owner,eventId,digest('held fake reply'),'held fake reply',principal);await f.runtime.worker.flush();assert.equal(f.sends.length,0);assert.equal(f.tasks.size,0);
  await f.runtime.shutdown();const next=await fixture(t,{backend:f.backend});assert.equal(next.sends.length,1);await next.runtime.worker.wake(owner);assert.equal(next.sends.length,1);
 });
 test('曖昧な送信受領はpendingに戻らず、再起動後も二重送信しない',async t=>{
@@ -84,8 +85,8 @@ test('曖昧な送信受領はpendingに戻らず、再起動後も二重送信�
  const next=await fixture(t,{backend,sendMessage:async()=>{sends++;return {ok:true};}});assert.equal(sends,1);await next.runtime.worker.wake(owner);assert.equal(sends,1);
 });
 test('起動時はクレーム済みコマンドを送信せずunknownに整合させる。失効許可はDiscord I/O前に拒否する',async t=>{
- const f=await fixture(t,{repliesEnabled:false});await f.subscribe();await f.runtime.worker.flush();await f.dispatch();const id=JSON.parse(f.callbacks[1].body).data.event_id;
- await f.rpc('tools/call',{name:'discord_reply_to_event',arguments:{event_id:id,content:'fake'}});await f.runtime.worker.flush();await f.runtime.store.claimQueuedReply(owner,'fake-crashed-request');await f.runtime.shutdown();
+ const f=await fixture(t);await f.subscribe();await f.runtime.worker.flush();await f.dispatch();const id=JSON.parse(f.callbacks[1].body).data.event_id;
+ await f.runtime.store.claimReply(owner,id,digest('fake'),'fake',principal);await f.runtime.worker.flush();await f.runtime.store.claimQueuedReply(owner,'fake-crashed-request');await f.runtime.shutdown();
  const next=await fixture(t,{backend:f.backend});assert.equal(next.sends.length,0);assert.equal((await next.runtime.store.status(owner)).replies[0].status,'unknown');
  const revoked=await fixture(t,{authorizeSubscription:async(_owner,_sub,required)=>!required});await revoked.subscribe();await revoked.runtime.worker.flush();await revoked.dispatch();
  await revoked.rpc('tools/call',{name:'discord_reply_to_event',arguments:{event_id:JSON.parse(revoked.callbacks[1].body).data.event_id,content:'fake'}});await revoked.runtime.worker.flush();assert.equal(revoked.sends.length,0);assert.equal((await revoked.runtime.store.status(owner)).replies[0].status,'rejected');
@@ -107,7 +108,7 @@ test('7日経過のメンションは、停止もリトライタイマー作成�
 test('統合ブートストラップは読み取り前に、旧オリジン・旧バケット・環境認証情報・誤った認証マウントを拒否する',async()=>{
  const env={CONSOLIDATED_DISCORD_ENABLE:'true',CONSOLIDATED_ORIGIN:'https://consolidated.example',CONSOLIDATED_BUCKET:'discord-receiver-state-123456789012-uswest1',CONSOLIDATED_AUTH_SECRET_FILE:'/var/run/secrets/discord-auth/secret.json'};
  let reads=0;const deps={readConfig:async()=>{reads++;throw Error('Must not read');},readSecret:async()=>{reads++;throw Error('Must not read');}};
- for(const patch of [{CONSOLIDATED_DISCORD_ENABLE:'false'},{CONSOLIDATED_ORIGIN:'https://synthetic-fixture.run.app'},{CONSOLIDATED_BUCKET:'mcp-events-test-state-123456789012'},{CONSOLIDATED_AUTH_SECRET_FILE:'/old-secret'},{GOOGLE_APPLICATION_CREDENTIALS:'fake-file'},{CONSOLIDATED_REPLIES_ENABLE:'invalid'}])await assert.rejects(prepareConsolidatedServer({...env,...patch},deps));assert.equal(reads,0);
+ for(const patch of [{CONSOLIDATED_DISCORD_ENABLE:'false'},{CONSOLIDATED_ORIGIN:'https://synthetic-fixture.run.app'},{CONSOLIDATED_BUCKET:'mcp-events-test-state-123456789012'},{CONSOLIDATED_AUTH_SECRET_FILE:'/old-secret'},{GOOGLE_APPLICATION_CREDENTIALS:'fake-file'}])await assert.rejects(prepareConsolidatedServer({...env,...patch},deps));assert.equal(reads,0);
 });
 test('5分のGatewayリースは間隔ごとに1回更新。クリーンなリリースで即座の後続を許す',async()=>{
  const b=memory(),tasks=new Map();let id=0,at=1000;const timers={setTimeout:(fn,delay)=>{tasks.set(++id,{fn,delay});return id;},clearTimeout:key=>tasks.delete(key)};

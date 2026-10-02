@@ -10,6 +10,7 @@ import {createDiscordGateway} from '../lib/adapters/discord-gateway.mjs';
 import {createConsolidatedRuntime} from '../consolidated-runtime.mjs';
 import {prepareGceServer} from '../gce-server.mjs';
 import {BOT_ID,GUILD_ID} from '../lib/adapters/discord.mjs';
+import {digest} from '../lib/events/envelope.mjs';
 
 const path=()=>join(mkdtempSync(join(tmpdir(),'discord-sqlite-test-')),'state.sqlite3');
 test('SQLiteトランザクションのロールバック・上限付き入力・読み取り専用ミューテータ・コミット済み再オープンで状態が残る',async()=>{
@@ -51,10 +52,10 @@ test('ローカルGatewayは更新タイマーを持たず、同プロセスの�
 });
 
 const channel='100000000000000600',owner='google:fixture',resource='https://gce.example/mcp/discord';
-async function fixture(t,{filename=path(),sendMessage,repliesEnabled=true,backendWrapper}={}){
+async function fixture(t,{filename=path(),sendMessage,backendWrapper}={}){
  const backing=createSqliteObjectBackend({filename}),backend=backendWrapper?backendWrapper(backing):backing;await backing.update('google-owner:v1',()=>({value:{sub:'fixture'}}));
  let options;const tasks=new Map(),sends=[],callbacks=[];let timer=0;
- const runtime=await createConsolidatedRuntime({backend,resource,token:'FAKE',channelIds:[channel],repliesEnabled,gatewayOwnership:'local-singleton',gatewaySessionKey:'gce-gateway:v1',authorizeSubscription:async()=>true,
+ const runtime=await createConsolidatedRuntime({backend,resource,token:'FAKE',channelIds:[channel],gatewayOwnership:'local-singleton',gatewaySessionKey:'gce-gateway:v1',authorizeSubscription:async()=>true,
   timers:{setTimeout:(fn,delay)=>{tasks.set(++timer,{fn,delay});return timer;},clearTimeout:id=>tasks.delete(id)},
   auth:{productionReady:true,challenge:'Bearer fake',authenticate:async()=>({owner,clientId:'fake-client',grantId:'fake-grant',grantExpiresAt:Date.now()+86400000,resource,scopes:['discord:read','discord:reply']}),handleHttp:async()=>false},
   gatewayFactory:o=>{options=o;return {start:async()=>{},stop(){},release:async()=>{}};},
@@ -76,7 +77,7 @@ test('SQLite統合のメンション/コールバック/読み取り/返信は�
  await f.close();const next=await fixture(t,{filename:f.filename});await next.rpc('tools/call',{name:'discord_reply_to_event',arguments:{event_id:id,content:'fake ordinary reply'}});assert.equal(next.sends.length,0);
 });
 test('起動時に回復されたSQLiteのクレーム済み送信はunknownとなり再送されない',async t=>{
- const f=await fixture(t,{repliesEnabled:false});await f.subscribe();const id=await f.dispatch();await f.rpc('tools/call',{name:'discord_reply_to_event',arguments:{event_id:id,content:'fake'}});await f.runtime.store.claimQueuedReply(owner,'fake-crashed-send');await f.close();
+ const f=await fixture(t);await f.subscribe();const id=await f.dispatch();await f.runtime.store.claimReply(owner,id,digest('fake'),'fake',{clientId:'fake-client',grantId:'fake-grant'});await f.runtime.store.claimQueuedReply(owner,'fake-crashed-send');await f.close();
  const next=await fixture(t,{filename:f.filename});assert.equal(next.sends.length,0);assert.equal((await next.runtime.store.status(owner)).replies[0].status,'unknown');
 });
 test('SQLiteで失われた受領応答はDiscordの重複送信を生まない',async t=>{
@@ -86,5 +87,5 @@ test('SQLiteで失われた受領応答はDiscordの重複送信を生まない'
 test('GCEブートストラップは読み取り前に、未承認/クラウドの状態パス・IPオリジン・認証情報フォールバックを拒否する',async()=>{
  const env={GCE_DISCORD_ENABLE:'true',GCE_DISCORD_ORIGIN:'https://gce.example',GCE_DISCORD_SQLITE_FILE:'/var/lib/discord-mcp/state.sqlite3',GCE_DISCORD_SYSTEMD_LOCK:'held',CREDENTIALS_DIRECTORY:'/run/credentials/discord-mcp.service'};let reads=0;
  const deps={readConfig:async()=>{reads++;throw Error('fake read forbidden');}};
- for(const patch of [{GCE_DISCORD_ENABLE:'false'},{GCE_DISCORD_ORIGIN:'https://192.0.2.1'},{GCE_DISCORD_ORIGIN:'https://synthetic-fixture.run.app'},{GCE_DISCORD_SQLITE_FILE:'/tmp/reset.sqlite3'},{GCE_DISCORD_SYSTEMD_LOCK:'false'},{CREDENTIALS_DIRECTORY:'/tmp/private'},{GOOGLE_APPLICATION_CREDENTIALS:'private-file'},{PROBE_BUCKET:'old-bucket'},{GCE_DISCORD_REPLIES_ENABLE:'invalid'}])await assert.rejects(prepareGceServer({...env,...patch},deps));assert.equal(reads,0);
+ for(const patch of [{GCE_DISCORD_ENABLE:'false'},{GCE_DISCORD_ORIGIN:'https://192.0.2.1'},{GCE_DISCORD_ORIGIN:'https://synthetic-fixture.run.app'},{GCE_DISCORD_SQLITE_FILE:'/tmp/reset.sqlite3'},{GCE_DISCORD_SYSTEMD_LOCK:'false'},{CREDENTIALS_DIRECTORY:'/tmp/private'},{GOOGLE_APPLICATION_CREDENTIALS:'private-file'},{PROBE_BUCKET:'old-bucket'}])await assert.rejects(prepareGceServer({...env,...patch},deps));assert.equal(reads,0);
 });

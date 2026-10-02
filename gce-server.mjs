@@ -21,7 +21,7 @@ export async function prepareGceServer(env,dependencies={}){
  if(env.GCE_DISCORD_ENABLE!=='true'||env.GOOGLE_APPLICATION_CREDENTIALS||env.STORAGE_EMULATOR_HOST||env.PROBE_BUCKET||env.CONSOLIDATED_DISCORD_ENABLE)throw Error('GCE deployment configuration required');
  const origin=new URL(env.GCE_DISCORD_ORIGIN??'');
  if(origin.protocol!=='https:'||origin.origin!==env.GCE_DISCORD_ORIGIN||origin.username||origin.password||origin.port||isIP(origin.hostname)||!origin.hostname.includes('.')||origin.hostname==='synthetic-fixture.run.app'||origin.hostname.endsWith('.run.app'))throw Error('Dedicated named HTTPS origin required');
- if(env.GCE_DISCORD_SQLITE_FILE!=='/var/lib/discord-mcp/state.sqlite3'||env.GCE_DISCORD_SYSTEMD_LOCK!=='held'||env.CREDENTIALS_DIRECTORY!=='/run/credentials/discord-mcp.service'||!['true','false'].includes(env.GCE_DISCORD_REPLIES_ENABLE??'false'))throw Error('Pinned persistent state and systemd credentials required');
+ if(env.GCE_DISCORD_SQLITE_FILE!=='/var/lib/discord-mcp/state.sqlite3'||env.GCE_DISCORD_SYSTEMD_LOCK!=='held'||env.CREDENTIALS_DIRECTORY!=='/run/credentials/discord-mcp.service')throw Error('Pinned persistent state and systemd credentials required');
  const backend=dependencies.backend??createSqliteObjectBackend({filename:env.GCE_DISCORD_SQLITE_FILE});
  if(backend?.localSingleton!==true)throw Error('SQLite process lock required');
  try{
@@ -30,7 +30,7 @@ export async function prepareGceServer(env,dependencies={}){
   const {channelIds,channelScope}=readDiscordChannelPolicy(env),token=(await(dependencies.readSecret??readFile)(env.CREDENTIALS_DIRECTORY+'/bot-token','utf8')).trim();
   await(dependencies.validateDiscord??validateDiscordIntegration)({token,channelIds,channelScope});
   const onTiming=dependencies.onTiming??createTimingSink(),reaction=dependencies.reaction??createDiscordEyes({token,channelIds,channelScope,onTiming});
-  const runtime=await createConsolidatedRuntime({backend,auth,resource,channelIds,channelScope,token,reaction,onTiming,inlineMentions:true,gatewayOwnership:'local-singleton',gatewaySessionKey:'gce-gateway:v1',sendMessage:dependencies.sendMessage??createDiscordRest({token,onTiming}),transport:dependencies.transport??createDiscordCallbackTransport(),repliesEnabled:env.GCE_DISCORD_REPLIES_ENABLE==='true',...(dependencies.gatewayFactory?{gatewayFactory:dependencies.gatewayFactory}:{}),...(dependencies.timers?{timers:dependencies.timers}:{}),onError:()=>console.error('保存済み状態を保持して処理を一時停止しました'),onGatewayState:(state,code)=>discordDiagnostic('gateway_'+state,{gatewayCode:code,repliesEnabled:env.GCE_DISCORD_REPLIES_ENABLE==='true'}),onFatal:dependencies.onFatal??(()=>{process.exitCode=1;})});
+  const runtime=await createConsolidatedRuntime({backend,auth,resource,channelIds,channelScope,token,reaction,onTiming,inlineMentions:true,gatewayOwnership:'local-singleton',gatewaySessionKey:'gce-gateway:v1',sendMessage:dependencies.sendMessage??createDiscordRest({token,onTiming}),transport:dependencies.transport??createDiscordCallbackTransport(),...(dependencies.gatewayFactory?{gatewayFactory:dependencies.gatewayFactory}:{}),...(dependencies.timers?{timers:dependencies.timers}:{}),onError:()=>console.error('保存済み状態を保持して処理を一時停止しました'),onGatewayState:(state,code)=>discordDiagnostic('gateway_'+state,{gatewayCode:code}),onFatal:dependencies.onFatal??(()=>{process.exitCode=1;})});
   let shutdown;return {...runtime,backend,shutdown(){return shutdown??=(async()=>{try{await runtime.shutdown();}finally{backend.close();}})();}};
  }catch(error){backend.close();throw error;}
 }

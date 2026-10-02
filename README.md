@@ -30,7 +30,7 @@ npm test
 4. `deployment/gce/` の 2 つのユニット例を systemd にインストールする。別のクレデンシャルプロバイダを使う場合は、`/run/discord-mcp-secrets/` の 2 つのクレデンシャルファイルを維持したままシークレットローダーユニットを差し替える。nginx には有効な証明書を用意し、`@@HOST@@` プレースホルダをレンダリングして、プロキシスニペットとタイミングログ形式をインストールする。HTTPS 例にあるルートのみを公開する。MCP と OAuth は HTTPS を使わなければならない。
 5. 準備済みホストを `sudo systemctl daemon-reload` と `sudo systemctl enable --now discord-mcp.service` で起動する。ユニットはプロセスロックの下で `npm start` 相当を実行し、Node を `127.0.0.1:8080` にバインドし、クレデンシャルディレクトリを供給する。`/healthz` を確認してから、コンシューマを `https://<your-host>/mcp/discord` に接続し、対象ギルドの `discord.mention.created` を購読する。
 
-bot には対象ギルド/チャンネルへのアクセス、Gateway の guild および guild-message インテント（マスク 513）、閲覧・返信送信・リアクション追加のチャンネル権限が必要。実装は Discord のロールやチャンネル権限を変更しない。`GCE_DISCORD_REPLIES_ENABLE=true` は自動返信が必要な場合のみ設定する。OAuth 許可・データベース・認証情報・ログはソース管理に入れない。
+bot には対象ギルド/チャンネルへのアクセス、Gateway の guild および guild-message インテント（マスク 513）、閲覧・返信送信・リアクション追加のチャンネル権限が必要。実装は Discord のロールやチャンネル権限を変更しない。OAuth 許可・データベース・認証情報・ログはソース管理に入れない。
 
 このリポジトリは汎用的な例とフェイクのフィクスチャのみを含み、デプロイ履歴や実運用設定は含まない。
 

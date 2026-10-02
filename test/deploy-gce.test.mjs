@@ -4,7 +4,7 @@ import {readFile} from 'node:fs/promises';
 import {parseEnv} from 'node:util';
 import {readDeployConfig,applyEnvOverrides,runtimeEnvKeys} from '../scripts/deploy-gce.mjs';
 
-const TEMPLATE_KEYS=runtimeEnvKeys('NODE_ENV=production\nDISCORD_GUILD_ID=1\nDISCORD_BOT_ID=2\nGOOGLE_ALLOWED_EMAIL=x\nGCE_DISCORD_REPLIES_ENABLE=false\nMCP_GCP_PROJECT=p\n');
+const TEMPLATE_KEYS=runtimeEnvKeys('NODE_ENV=production\nDISCORD_GUILD_ID=1\nDISCORD_BOT_ID=2\nGOOGLE_ALLOWED_EMAIL=x\nMCP_GCP_PROJECT=p\n');
 const valid={
  DEPLOY_HOST:'discord.example.com',
  DEPLOY_GOOGLE_CLIENT_ID:'123-fixture.apps.googleusercontent.com',
@@ -29,9 +29,9 @@ test('readDeployConfig は対象フィールドと必須 env キーを検証す�
 });
 
 test('runtime.env にはテンプレート同名キーまたは DEPLOY_ENV_ キーのみ渡る',()=>{
- const s=readDeployConfig({...valid,PATH:'C:\\Windows',DEPLOY_ENV_GCE_DISCORD_REPLIES_ENABLE:'true'},TEMPLATE_KEYS);
+ const s=readDeployConfig({...valid,PATH:'C:\\Windows',DEPLOY_ENV_EXAMPLE_FLAG:'true'},TEMPLATE_KEYS);
  assert.equal(s.env.PATH,undefined);
- assert.equal(s.env.GCE_DISCORD_REPLIES_ENABLE,'true');
+ assert.equal(s.env.EXAMPLE_FLAG,'true');
 });
 
 test('env オーバーライドは描画行を置き換え、MCP アイデンティティを埋め、新規キーを追加する',()=>{
