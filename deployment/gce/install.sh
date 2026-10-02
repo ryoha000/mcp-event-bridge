@@ -124,8 +124,9 @@ if ! systemctl is-enabled --quiet discord-mcp.service 2>/dev/null; then
   systemctl enable discord-mcp.service
   CHANGED=1
 fi
+# restart の失敗で中断しないよう || true にし、後続のヘルスチェックで判定する。
 if [ "$CHANGED" = 1 ] || ! systemctl is-active --quiet discord-mcp.service || [ ! -f /run/discord-mcp-secrets/bot-token ]; then
-  systemctl restart discord-mcp-secrets.service discord-mcp.service
+  systemctl restart discord-mcp-secrets.service discord-mcp.service || true
 fi
 
 # --- ヘルスチェック ---
@@ -140,9 +141,15 @@ if [ "$ok" != 1 ]; then
     mv "$APP.prev" "$APP"
     if [ "$CFG_CHANGED" = 1 ] && [ -f "$ETC/runtime.env.prev" ]; then mv "$ETC/runtime.env.prev" "$ETC/runtime.env"; fi
     systemctl restart discord-mcp-secrets.service discord-mcp.service || true
-    echo "health check failed; application code rolled back" >&2
+    recovered=0
+    for _ in $(seq 1 15); do
+      if curl -fsS --max-time 5 http://127.0.0.1:8080/healthz >/dev/null 2>&1; then recovered=1; break; fi
+      sleep 2
+    done
+    echo "health check failed; rolled back to previous revision (recovered=$recovered)" >&2
+  else
+    echo "health check failed" >&2
   fi
-  echo "health check failed" >&2
   exit 1
 fi
 echo "deploy ok: $REVISION"
