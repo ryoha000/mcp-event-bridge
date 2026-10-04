@@ -22,8 +22,10 @@ test('X Web Push adapter preserves raw JSON and derives a stable event ID',()=>{
  assert.deepEqual(adapter.subscriptionInputSchema,{type:'object',properties:{},additionalProperties:false});
  assert.throws(()=>adapter.validateSubscriptionArguments({anything:'else'}));
  assert.throws(()=>adapter.normalize({body:'x'.repeat(13000)}));
- assert.deepEqual(readXWebPushConfig({X_WEB_PUSH_ENABLE:'false'}),{enabled:false});
- assert.deepEqual(readXWebPushConfig({X_WEB_PUSH_ENABLE:'true',X_WEB_PUSH_SOURCE_ID:'@owner'}),{enabled:true,sourceId:'@owner'});
+ assert.deepEqual(readXWebPushConfig({}),{enabled:false});
+ assert.deepEqual(readXWebPushConfig({X_WEB_PUSH_SOURCE_ID:''}),{enabled:false});
+ assert.deepEqual(readXWebPushConfig({X_WEB_PUSH_SOURCE_ID:'@owner'}),{enabled:true,sourceId:'@owner'});
+ assert.throws(()=>readXWebPushConfig({X_WEB_PUSH_SOURCE_ID:'invalid source'}));
 });
 
 test('host-local X ingest fans raw payload into MCP Events and remains read-only',async t=>{
