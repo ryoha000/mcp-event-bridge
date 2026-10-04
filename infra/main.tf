@@ -26,7 +26,7 @@ resource "google_service_account" "vm" {
 }
 
 # --- シークレット（値のバージョンは手動管理。Terraform が作るのは
-# コンテナと、VM アイデンティティへのこの 2 本へのアクセス権のみ） ---
+# コンテナと、VM アイデンティティへのアクセス権のみ） ---
 
 resource "google_secret_manager_secret" "bot_token" {
   secret_id = var.bot_secret_name
@@ -52,6 +52,35 @@ resource "google_secret_manager_secret_iam_member" "bot_token" {
 
 resource "google_secret_manager_secret_iam_member" "auth" {
   secret_id = google_secret_manager_secret.auth.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.vm.email}"
+}
+
+
+resource "google_secret_manager_secret" "x_auth_token" {
+  secret_id = var.x_auth_token_secret_name
+  replication {
+    auto {}
+  }
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_secret_manager_secret" "x_ct0" {
+  secret_id = var.x_ct0_secret_name
+  replication {
+    auto {}
+  }
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_secret_manager_secret_iam_member" "x_auth_token" {
+  secret_id = google_secret_manager_secret.x_auth_token.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.vm.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "x_ct0" {
+  secret_id = google_secret_manager_secret.x_ct0.secret_id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.vm.email}"
 }
