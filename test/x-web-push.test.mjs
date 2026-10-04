@@ -28,10 +28,10 @@ test('X Web Push adapter preserves raw JSON and derives a stable event ID',()=>{
 
 test('host-local X ingest fans raw payload into MCP Events and remains read-only',async t=>{
  const backend=memory();await backend.update('google-owner:v1',()=>({value:{sub:'fixture'}}));
- const callbacks=[],adapter=createXWebPushAdapter({sourceId:'@owner',now:()=>Date.parse('2026-10-05T00:00:00.000Z')});
- const principal={owner,clientId:'fake-client',grantId:'fake-grant',grantExpiresAt:Date.now()+86400000,resource,scopes:['x:read']};
+ const at=Date.now(),callbacks=[],adapter=createXWebPushAdapter({sourceId:'@owner',now:()=>at});
+ const principal={owner,clientId:'fake-client',grantId:'fake-grant',grantExpiresAt:at+86400000,resource,scopes:['x:read']};
  const runtime=await createConsolidatedRuntime({
-  backend,resource,token:'FAKE',channelIds:[channel],extraAdapters:[adapter],localIngestRoutes:[{path:'/internal/x-web-push',source:'x'}],authorizeSubscription:async()=>true,
+  backend,resource,token:'FAKE',channelIds:[channel],extraAdapters:[adapter],localIngestRoutes:[{path:'/internal/x-web-push',source:'x'}],authorizeSubscription:async()=>true,now:()=>at,
   auth:{productionReady:true,challenge:'Bearer fixture',authenticate:async()=>principal,handleHttp:async()=>false},
   gatewayFactory:()=>({start:async()=>{},stop(){},release:async()=>{}}),
   sendMessage:async()=>({ok:true,messageId:'100000000000002000'}),
