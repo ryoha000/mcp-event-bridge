@@ -50,5 +50,4 @@ jobs:
           DISCORD_GUILD_ID: ${{ secrets.DISCORD_GUILD_ID }}
           DISCORD_BOT_ID: ${{ secrets.DISCORD_BOT_ID }}
           GOOGLE_ALLOWED_EMAIL: ${{ vars.GOOGLE_ALLOWED_EMAIL }}
-          X_WEB_PUSH_ENABLE: ${{ vars.X_WEB_PUSH_ENABLE || 'false' }}
-          X_WEB_PUSH_SOURCE_ID: ${{ vars.X_WEB_PUSH_SOURCE_ID || '@replace_me' }}
+          X_WEB_PUSH_SOURCE_ID: ${{ vars.X_WEB_PUSH_SOURCE_ID }}

@@ -28,7 +28,6 @@ bridge は通知 JSON を解釈・要約せず、`x.web_push.received` の `data
 `/etc/discord-mcp/runtime.env` に以下を追加する。
 
 ```sh
-X_WEB_PUSH_ENABLE=true
 X_WEB_PUSH_SOURCE_ID=@your_handle
 ```
 
@@ -36,25 +35,48 @@ X_WEB_PUSH_SOURCE_ID=@your_handle
 
 公開 nginx 設定は `/internal/x-web-push` を proxy しない。Angelic-Angel は同一 VM 上から直接 `127.0.0.1:8080` へ POST する。
 
-## Terraform / Secret Manager の準備
+## Secret Manager の準備
 
-このリポジトリの Terraform は `terraform apply` で次の Secret Manager **コンテナ**と、VM service account の `secretAccessor` を作成する。
+この X 連携のためだけに `terraform apply` は使わない。既存インフラの Terraform state が手元にない場合、VM/VPC/WIF など既存リソースまで新規作成扱いになるためである。
 
-- `x-monitor-auth-token`
-- `x-monitor-ct0`
-
-Secret の値（version）は Terraform では作らない。Cookie を Terraform state に入れないため、値は `gcloud secrets versions add` で別途投入する。
+X 用の Secret 2個だけを `gcloud` で作成する。
 
 ```sh
-cp infra/terraform.tfvars.example infra/terraform.tfvars
-# terraform.tfvars の project_id / project_number / github_repo / admin_members を自分の環境に合わせる
+export PROJECT_ID='<your-gcp-project>'
 
-terraform -chdir=infra init
-terraform -chdir=infra plan
-terraform -chdir=infra apply
+gcloud secrets describe x-monitor-auth-token --project="$PROJECT_ID" >/dev/null 2>&1 || \
+  gcloud secrets create x-monitor-auth-token --project="$PROJECT_ID" --replication-policy=automatic
 
-terraform -chdir=infra output x_secret_names
+gcloud secrets describe x-monitor-ct0 --project="$PROJECT_ID" >/dev/null 2>&1 || \
+  gcloud secrets create x-monitor-ct0 --project="$PROJECT_ID" --replication-policy=automatic
 ```
+
+次に、実際に bridge が動いている VM の service account を確認する。
+
+```sh
+export INSTANCE='<your-instance-name>'
+export ZONE='<your-zone>'
+
+VM_SA="$(gcloud compute instances describe "$INSTANCE" \
+  --project="$PROJECT_ID" \
+  --zone="$ZONE" \
+  --format='value(serviceAccounts[0].email)')"
+
+printf '%s\n' "$VM_SA"
+```
+
+その service account に、X 用 Secret 2個だけの read 権限を付ける。
+
+```sh
+for SECRET in x-monitor-auth-token x-monitor-ct0; do
+  gcloud secrets add-iam-policy-binding "$SECRET" \
+    --project="$PROJECT_ID" \
+    --member="serviceAccount:$VM_SA" \
+    --role="roles/secretmanager.secretAccessor"
+done
+```
+
+Secret の値（version）は次節の手順で別途投入する。値を Terraform variables/state に入れない。
 
 ## X Cookie の取得
 
@@ -93,10 +115,9 @@ gcloud secrets versions list x-monitor-ct0 --project="$PROJECT_ID"
 
 ## bridge のデプロイ
 
-ローカルデプロイでは `.env.example` を `.env` にコピーし、既存の必須値に加えて X を有効化する。
+ローカルデプロイでは `.env.example` を `.env` にコピーし、既存の必須値に加えて `X_WEB_PUSH_SOURCE_ID` を設定すると X Web Push が有効になる。
 
 ```sh
-X_WEB_PUSH_ENABLE=true
 X_WEB_PUSH_SOURCE_ID=@your_target_handle
 ```
 
@@ -113,7 +134,6 @@ npm run deploy
 GitHub Actions の CD を使う場合は、`production` environment の variables に次を追加する。
 
 ```text
-X_WEB_PUSH_ENABLE=true
 X_WEB_PUSH_SOURCE_ID=@your_target_handle
 ```
 
@@ -172,7 +192,7 @@ sudo -u angelic-angel /usr/local/bin/angelic-angel \
 監視専用 X アカウントの `auth_token` と `ct0` は Secret Manager に別々の secret として保存する。bridge の `discord-mcp-secrets.service` が VM identity でそれらを読み、root 限定の `/run/discord-mcp-secrets/x-auth-token` と `x-ct0` に展開する。値は runtime.env や Git には入れない。
 
 ```sh
-X_WEB_PUSH_ENABLE=true
+X_WEB_PUSH_SOURCE_ID=@your_target_handle
 MCP_X_AUTH_TOKEN_SECRET=x-monitor-auth-token
 MCP_X_AUTH_TOKEN_SECRET_VERSION=latest
 MCP_X_CT0_SECRET=x-monitor-ct0

@@ -38,7 +38,7 @@ bot には対象ギルド/チャンネルへのアクセス、Gateway の guild 
 
 任意で [Angelic-Angel](https://github.com/ryoha000/Angelic-Angel) を同一 VM に常駐させ、raw X Web Push JSON を `x.web_push.received` として同じ MCP Events 接続へ流せる。ブラウザの常駐は不要で、Angelic-Angel 自体が Mozilla AutoPush への WebSocket を維持する。
 
-`X_WEB_PUSH_ENABLE=true` と安定した `X_WEB_PUSH_SOURCE_ID` を設定し、Angelic-Angel の `WEBHOOK_ENDPOINT` を `http://127.0.0.1:8080/internal/x-web-push` にする。nginx の公開設定はこの内部 ingest path を公開しない。
+安定した `X_WEB_PUSH_SOURCE_ID` を設定すると X Web Push が有効になる。未設定または空なら無効。Angelic-Angel の `WEBHOOK_ENDPOINT` を `http://127.0.0.1:8080/internal/x-web-push` にする。nginx の公開設定はこの内部 ingest path を公開しない。
 
 X Cookie (`auth_token`, `ct0`) はソース管理に入れない。systemd credentials 対応済みの fork を使い、Secret Manager → root 限定 `/run` → `LoadCredential` で渡すため、Cookie は `angelic-angel.toml` に保存しない。詳しい構成と監視専用 X アカウントの手順は [docs/x-web-push.md](docs/x-web-push.md) を参照。
 
@@ -76,6 +76,8 @@ gh variable set DEPLOY_ZONE --env production -b "<ゾーン>"
 gh variable set DEPLOY_INSTANCE --env production -b "<インスタンス名>"
 gh variable set DEPLOY_NODE_VERSION --env production -b "22.23.3"
 gh variable set GOOGLE_ALLOWED_EMAIL --env production -b "<オーナーのメール>"
+# X Web Push を使う場合だけ設定。未設定/空なら無効。
+gh variable set X_WEB_PUSH_SOURCE_ID --env production -b "@your_target_handle"
 
 gh secret set GCP_WIF_PROVIDER --env production -b "$(terraform -chdir=infra output -raw wif_provider)"
 gh secret set GCP_DEPLOY_SA --env production -b "$(terraform -chdir=infra output -raw deploy_service_account)"
