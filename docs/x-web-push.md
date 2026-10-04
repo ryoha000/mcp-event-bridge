@@ -134,7 +134,6 @@ npm run deploy
 GitHub Actions の CD を使う場合は、`production` environment の variables に次を追加する。
 
 ```text
-X_WEB_PUSH_ENABLE=true
 X_WEB_PUSH_SOURCE_ID=@your_target_handle
 ```
 
