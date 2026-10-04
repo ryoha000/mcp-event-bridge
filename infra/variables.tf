@@ -108,3 +108,15 @@ variable "auth_secret_name" {
   type        = string
   default     = "discord-consolidated-auth"
 }
+
+variable "x_auth_token_secret_name" {
+  description = "監視専用 X アカウントの auth_token を保持する Secret Manager シークレット。"
+  type        = string
+  default     = "x-monitor-auth-token"
+}
+
+variable "x_ct0_secret_name" {
+  description = "監視専用 X アカウントの ct0 を保持する Secret Manager シークレット。"
+  type        = string
+  default     = "x-monitor-ct0"
+}
