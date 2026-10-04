@@ -28,7 +28,6 @@ bridge は通知 JSON を解釈・要約せず、`x.web_push.received` の `data
 `/etc/discord-mcp/runtime.env` に以下を追加する。
 
 ```sh
-X_WEB_PUSH_ENABLE=true
 X_WEB_PUSH_SOURCE_ID=@your_handle
 ```
 
@@ -116,10 +115,9 @@ gcloud secrets versions list x-monitor-ct0 --project="$PROJECT_ID"
 
 ## bridge のデプロイ
 
-ローカルデプロイでは `.env.example` を `.env` にコピーし、既存の必須値に加えて X を有効化する。
+ローカルデプロイでは `.env.example` を `.env` にコピーし、既存の必須値に加えて `X_WEB_PUSH_SOURCE_ID` を設定すると X Web Push が有効になる。
 
 ```sh
-X_WEB_PUSH_ENABLE=true
 X_WEB_PUSH_SOURCE_ID=@your_target_handle
 ```
 
@@ -195,7 +193,7 @@ sudo -u angelic-angel /usr/local/bin/angelic-angel \
 監視専用 X アカウントの `auth_token` と `ct0` は Secret Manager に別々の secret として保存する。bridge の `discord-mcp-secrets.service` が VM identity でそれらを読み、root 限定の `/run/discord-mcp-secrets/x-auth-token` と `x-ct0` に展開する。値は runtime.env や Git には入れない。
 
 ```sh
-X_WEB_PUSH_ENABLE=true
+X_WEB_PUSH_SOURCE_ID=@your_target_handle
 MCP_X_AUTH_TOKEN_SECRET=x-monitor-auth-token
 MCP_X_AUTH_TOKEN_SECRET_VERSION=latest
 MCP_X_CT0_SECRET=x-monitor-ct0
