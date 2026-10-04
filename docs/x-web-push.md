@@ -36,25 +36,48 @@ X_WEB_PUSH_SOURCE_ID=@your_handle
 
 公開 nginx 設定は `/internal/x-web-push` を proxy しない。Angelic-Angel は同一 VM 上から直接 `127.0.0.1:8080` へ POST する。
 
-## Terraform / Secret Manager の準備
+## Secret Manager の準備
 
-このリポジトリの Terraform は `terraform apply` で次の Secret Manager **コンテナ**と、VM service account の `secretAccessor` を作成する。
+この X 連携のためだけに `terraform apply` は使わない。既存インフラの Terraform state が手元にない場合、VM/VPC/WIF など既存リソースまで新規作成扱いになるためである。
 
-- `x-monitor-auth-token`
-- `x-monitor-ct0`
-
-Secret の値（version）は Terraform では作らない。Cookie を Terraform state に入れないため、値は `gcloud secrets versions add` で別途投入する。
+X 用の Secret 2個だけを `gcloud` で作成する。
 
 ```sh
-cp infra/terraform.tfvars.example infra/terraform.tfvars
-# terraform.tfvars の project_id / project_number / github_repo / admin_members を自分の環境に合わせる
+export PROJECT_ID='<your-gcp-project>'
 
-terraform -chdir=infra init
-terraform -chdir=infra plan
-terraform -chdir=infra apply
+gcloud secrets describe x-monitor-auth-token --project="$PROJECT_ID" >/dev/null 2>&1 || \
+  gcloud secrets create x-monitor-auth-token --project="$PROJECT_ID" --replication-policy=automatic
 
-terraform -chdir=infra output x_secret_names
+gcloud secrets describe x-monitor-ct0 --project="$PROJECT_ID" >/dev/null 2>&1 || \
+  gcloud secrets create x-monitor-ct0 --project="$PROJECT_ID" --replication-policy=automatic
 ```
+
+次に、実際に bridge が動いている VM の service account を確認する。
+
+```sh
+export INSTANCE='<your-instance-name>'
+export ZONE='<your-zone>'
+
+VM_SA="$(gcloud compute instances describe "$INSTANCE" \
+  --project="$PROJECT_ID" \
+  --zone="$ZONE" \
+  --format='value(serviceAccounts[0].email)')"
+
+printf '%s\n' "$VM_SA"
+```
+
+その service account に、X 用 Secret 2個だけの read 権限を付ける。
+
+```sh
+for SECRET in x-monitor-auth-token x-monitor-ct0; do
+  gcloud secrets add-iam-policy-binding "$SECRET" \
+    --project="$PROJECT_ID" \
+    --member="serviceAccount:$VM_SA" \
+    --role="roles/secretmanager.secretAccessor"
+done
+```
+
+Secret の値（version）は次節の手順で別途投入する。値を Terraform variables/state に入れない。
 
 ## X Cookie の取得
 
