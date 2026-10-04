@@ -25,7 +25,7 @@ export async function createConsolidatedRuntime({backend,auth,resource,channelId
  }
  const requestContext=new AsyncLocalStorage(),timing=(phase,details)=>{try{onTiming(phase,details);}catch{}};
  const authorize=authorizeSubscription??createSubscriptionAuthorizer({backend,resource});
- const callbackData=event=>{const sourceAdapter=adapters.find(a=>a.source===event.source);return sourceAdapter?.callbackData?.(event);};
+ const callbackData=event=>{const sourceAdapter=adapters.find(a=>a.source===event.source);return sourceAdapter?.callbackData?sourceAdapter.callbackData(event):{event_id:event.eventId,source:event.source,guild_id:event.origin.tenantId};};
  const worker=createLocalEventWorker({store,adapter,callbackData,transport,authorizeSubscription:authorize,now,timers,onError,onTiming:timing});
  const events=createEventService({store,adapters,transport,queueReplies:true,authorizeQueuedReply:authorize,subscriptionTtlMs:8*3600000,diagnosticSink:()=>{},statusConfiguration:{channelAllowlistCount:channelScope==='allowlist'?channelIds.length:null,channelAccessPolicy:channelScope,replyExecution:'queued_locally',mechanicalEyesEnabled:!!reaction,inlineMentionPayload:inlineMentions}});
  let stopped=false,pressureTimer,releasePressure;
