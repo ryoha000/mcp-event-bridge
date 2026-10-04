@@ -1,6 +1,6 @@
 # X Web Push → MCP Events
 
-このホストは [Angelic-Angel](https://github.com/sh1ma/Angelic-Angel) を同じ VM で常駐させることで、X の Web Push 通知を raw JSON のまま MCP Events に流せる。
+このホストは [Angelic-Angel](https://github.com/ryoha000/Angelic-Angel) を同じ VM で常駐させることで、X の Web Push 通知を raw JSON のまま MCP Events に流せる。
 
 ```
 X → Mozilla AutoPush → Angelic-Angel → http://127.0.0.1:8080/internal/x-web-push
@@ -38,41 +38,61 @@ X_WEB_PUSH_SOURCE_ID=@your_handle
 
 ## Angelic-Angel の設定
 
-Angelic-Angel をビルド・インストールし、専用ユーザーを作る。例:
+この構成では systemd credentials 対応済みの [ryoha000/Angelic-Angel](https://github.com/ryoha000/Angelic-Angel) を使う。ブラウザ常駐は不要で、X Cookie は TOML に保存しない。
+
+専用ユーザーと永続 state directory を作る。
 
 ```sh
 sudo useradd --system --home /var/lib/angelic-angel --shell /usr/sbin/nologin angelic-angel
 sudo install -d -o angelic-angel -g angelic-angel -m 0700 /var/lib/angelic-angel
 ```
 
-初回だけ、専用ユーザーで config を作成して Web Push subscription を登録する。
+fork版 Angelic-Angel を `/usr/local/bin/angelic-angel` にインストールした後、Cookie を含まない config を作る。
 
 ```sh
 sudo -u angelic-angel /usr/local/bin/angelic-angel \
-  -c /var/lib/angelic-angel/angelic-angel.toml init
-
-sudo -u angelic-angel /usr/local/bin/angelic-angel \
-  -c /var/lib/angelic-angel/angelic-angel.toml register
-
-sudo chmod 0600 /var/lib/angelic-angel/angelic-angel.toml
+  -c /var/lib/angelic-angel/angelic-angel.toml init --systemd-credentials
 ```
 
-その後、`deployment/gce/angelic-angel.service.example` を環境に合わせてインストールし、常駐させる。
+監視専用 X アカウントの `auth_token` と `ct0` は Secret Manager に別々の secret として保存する。bridge の `discord-mcp-secrets.service` が VM identity でそれらを読み、root 限定の `/run/discord-mcp-secrets/x-auth-token` と `x-ct0` に展開する。値は runtime.env や Git には入れない。
+
+```sh
+X_WEB_PUSH_ENABLE=true
+MCP_X_AUTH_TOKEN_SECRET=x-monitor-auth-token
+MCP_X_AUTH_TOKEN_SECRET_VERSION=latest
+MCP_X_CT0_SECRET=x-monitor-ct0
+MCP_X_CT0_SECRET_VERSION=latest
+```
+
+最初の Web Push 登録も systemd credentials を付けて実行する。
+
+```sh
+sudo systemctl restart discord-mcp-secrets.service
+
+sudo systemd-run --wait --pipe \
+  -p User=angelic-angel \
+  -p Group=angelic-angel \
+  -p LoadCredential=auth_token:/run/discord-mcp-secrets/x-auth-token \
+  -p LoadCredential=ct0:/run/discord-mcp-secrets/x-ct0 \
+  /usr/local/bin/angelic-angel \
+  -c /var/lib/angelic-angel/angelic-angel.toml register
+```
+
+登録後は `deployment/gce/angelic-angel.service.example` を systemd に入れて常駐させる。この unit は同じ `/run/discord-mcp-secrets/*` を `LoadCredential` し、Angelic-Angel には `$CREDENTIALS_DIRECTORY/auth_token` と `$CREDENTIALS_DIRECTORY/ct0` として見せる。
 
 ## シークレットの扱い
 
-`auth_token` と `ct0` はログインセッション資格情報として扱い、Git、GitHub Actions variables、通常の環境ファイル、PR/Issue、ログには入れない。
+`auth_token` と `ct0` はログインセッション資格情報として扱う。
 
-現在の Angelic-Angel は Twitter Cookie と Web Push 登録状態を同じ TOML に保存し、UAID 再登録時にもその config を読み書きする。このため、Secret Manager から起動時だけ注入してディスクに一切残さない構成には、そのままではできない。
+- Git、GitHub Actions variables、通常の環境ファイル、PR/Issue、ログには値を入れない。
+- Secret Manager には `auth_token` と `ct0` を別 secret として保存する。
+- VM の service account には必要な secret version への access のみ付与する。
+- bridge の secret loader は値を root 限定の揮発 `/run` に置く。
+- systemd はその値を Angelic-Angel 専用 credential directory にコピーする。
+- fork版 Angelic-Angel の `--systemd-credentials` モードでは Cookie を `angelic-angel.toml` に書かない。
+- `angelic-angel.toml` には Web Push の秘密鍵と AutoPush 登録状態だけが残り、Unix では mode `0600` で保存される。
 
-現状の推奨は次の通り。
-
-- `/var/lib/angelic-angel/angelic-angel.toml` を専用ユーザー所有・mode `0600` にする。
-- VM への SSH/IAM を最小化する。
-- Cookie をローテーションしたら config を更新して再登録する。
-- Secret Manager を使う場合も「初期投入元」として扱い、現行 upstream が最終的に TOML へ保存する点を前提にする。
-
-Cookie と registration を分離して、Cookie を systemd credential / Secret Manager からのみ読むようにするには Angelic-Angel 側の変更が必要。
+Cookie をローテーションした場合は Secret Manager に新 version を追加し、`latest` を使っていれば secret loader と Angelic-Angel を再起動する。Twitter/X 側への再登録が必要になった場合も、Angelic-Angel は systemd credentials を再読込して自動再登録する。
 
 ## dot 側
 
