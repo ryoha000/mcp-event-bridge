@@ -47,8 +47,8 @@ test('VM専用シークレットローダーはlatest指定で解決済みバー
 });
 
 test('X Web Push有効時は監視アカウントCookieも検証後にroot限定ランタイムへ公開する',async()=>{
- const keys=['X_WEB_PUSH_ENABLE','MCP_X_AUTH_TOKEN_SECRET_VERSION','MCP_X_CT0_SECRET_VERSION'],saved=keys.map(k=>process.env[k]);
- process.env.X_WEB_PUSH_ENABLE='true';process.env.MCP_X_AUTH_TOKEN_SECRET_VERSION='1';process.env.MCP_X_CT0_SECRET_VERSION='1';
+ const keys=['X_WEB_PUSH_SOURCE_ID','MCP_X_AUTH_TOKEN_SECRET_VERSION','MCP_X_CT0_SECRET_VERSION'],saved=keys.map(k=>process.env[k]);
+ process.env.X_WEB_PUSH_SOURCE_ID='@owner';process.env.MCP_X_AUTH_TOKEN_SECRET_VERSION='1';process.env.MCP_X_CT0_SECRET_VERSION='1';
  try{
   const f=fake();assert.deepEqual(await fetchGceSecrets(f),{loaded:true,versionsVerified:true,xLoaded:true});
   assert.deepEqual(f.writes.map(x=>x.name),['bot-token','auth.json','x-auth-token','x-ct0']);
