@@ -33,7 +33,7 @@ X_WEB_PUSH_SOURCE_ID=@your_handle
 
 `X_WEB_PUSH_SOURCE_ID` は秘密ではない。イベントの tenant/source identity を安定させるためのラベルで、監視対象の handle などを使う。
 
-公開 nginx 設定は `/internal/x-web-push` を proxy しない。Angelic-Angel は同一 VM 上から直接 `127.0.0.1:8080` へ POST する。
+公開 nginx 設定は `/internal/x-web-push` を proxy しない。Angelic-Angel は同一 VM 上から直接 `127.0.0.1:8080` へ POST する。公開側では Discord を `/mcp/discord`、X を `/mcp/x` に分離し、X の OAuth issuer は `/x` を使う。
 
 ## Secret Manager の準備
 
@@ -229,9 +229,20 @@ sudo systemd-run --wait --pipe \
 
 Cookie をローテーションした場合は Secret Manager に新 version を追加し、`latest` を使っていれば secret loader と Angelic-Angel を再起動する。Twitter/X 側への再登録が必要になった場合も、Angelic-Angel は systemd credentials を再読込して自動再登録する。
 
-## dot 側
+## dot / ChatGPT 側
 
-既存の `/mcp/discord` resource をそのまま利用し、OAuth で `x:read` を許可する。イベント一覧には `x.web_push.received` が追加される。
+X は既存の Discord plugin へ追加せず、別 plugin として登録する。
+
+- 表示名の例: `MCP Event Bridge(X)`
+- MCP Server URL: `https://<your-host>/mcp/x`
+- OAuth issuer: `https://<your-host>/x`
+- OAuth scope: `x:read` のみ
+- event: `x.web_push.received`
+- tool: `x_read_event`
+
+既存の `MCP Event Bridge(Discord)` は `/mcp/discord` のままで、`discord:read` / `discord:reply` の既存 client/grant を変更しない。X 側は新規 OAuth client と専用 state/cookie namespace を使うため、Discord 側の再認可は不要。
+
+X plugin の consent 画面には、X が read-only で raw Web Push payload のみを公開し X へ投稿できない旨が表示される。
 
 subscription arguments は空オブジェクト:
 

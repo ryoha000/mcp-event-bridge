@@ -4,7 +4,7 @@ import {createServer} from 'node:http';
 import {createConsolidatedRuntime} from '../consolidated-runtime.mjs';
 import {createXWebPushAdapter,X_WEB_PUSH_EVENT,readXWebPushConfig} from '../lib/adapters/x-web-push.mjs';
 
-const channel='100000000000000600',owner='google:fixture',resource='https://bridge.example/mcp/discord';
+const channel='100000000000000600',owner='google:fixture',resource='https://bridge.example/mcp/discord',xResource='https://bridge.example/mcp/x';
 function memory(){
  const data=new Map();
  return {durable:true,async read(k){return structuredClone(data.get(k)??null);},async update(k,fn){const next=fn(structuredClone(data.get(k)??null));if(Object.hasOwn(next,'value'))data.set(k,structuredClone(next.value));return next.result;}};
@@ -31,10 +31,10 @@ test('X Web Push adapter preserves raw JSON and derives a stable event ID',()=>{
 test('host-local X ingest fans raw payload into MCP Events and remains read-only',async t=>{
  const backend=memory();await backend.update('google-owner:v1',()=>({value:{sub:'fixture'}}));
  const at=Date.now(),callbacks=[],adapter=createXWebPushAdapter({sourceId:'@owner',now:()=>at});
- const principal={owner,clientId:'fake-client',grantId:'fake-grant',grantExpiresAt:at+86400000,resource,scopes:['x:read']};
+ const principal={owner,clientId:'fake-client',grantId:'fake-grant',grantExpiresAt:at+86400000,resource:xResource,scopes:['x:read']};
  const runtime=await createConsolidatedRuntime({
-  backend,resource,token:'FAKE',channelIds:[channel],extraAdapters:[adapter],localIngestRoutes:[{path:'/internal/x-web-push',source:'x'}],authorizeSubscription:async()=>true,now:()=>at,
-  auth:{productionReady:true,challenge:'Bearer fixture',authenticate:async()=>principal,handleHttp:async()=>false},
+  backend,resource,sourceResources:{x:xResource},token:'FAKE',channelIds:[channel],extraAdapters:[adapter],localIngestRoutes:[{path:'/internal/x-web-push',source:'x'}],authorizeSubscription:async()=>true,now:()=>at,
+  auth:{productionReady:true,consumerPaths:['/mcp/x'],challenge:'Bearer fixture',authenticate:async()=>principal,handleHttp:async()=>false},
   gatewayFactory:()=>({start:async()=>{},stop(){},release:async()=>{}}),
   sendMessage:async()=>({ok:true,messageId:'100000000000002000'}),
   transport:async(_url,request)=>{
@@ -46,7 +46,7 @@ test('host-local X ingest fans raw payload into MCP Events and remains read-only
  const server=createServer(runtime.requestListener);server.keepAliveTimeout=1;await new Promise(done=>server.listen(0,'127.0.0.1',done));
  t.after(async()=>{await runtime.shutdown();server.closeAllConnections();await new Promise(done=>server.close(done));});
  const base='http://127.0.0.1:'+server.address().port;
- const rpc=async(method,params={})=>(await fetch(base+'/mcp/discord',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})})).json();
+ const rpc=async(method,params={})=>(await fetch(base+'/mcp/x',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})})).json();
  const subscription=await rpc('events/subscribe',{name:X_WEB_PUSH_EVENT,arguments:{},delivery:{mode:'webhook',url:'https://callback.example/wake',secret:'whsec_'+Buffer.alloc(32,8).toString('base64')}});
  assert.equal(subscription.error,undefined);
  const listed=await rpc('tools/list');assert.deepEqual(listed.result.tools.map(x=>x.name),['x_read_event']);

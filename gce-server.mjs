@@ -6,6 +6,7 @@ import {pathToFileURL} from 'node:url';
 import {createSqliteObjectBackend} from './lib/sqlite-store.mjs';
 import {readProductionConfig} from './lib/production-config.mjs';
 import {createOAuth} from './lib/oauth.mjs';
+import {routeSourceOAuth} from './lib/oauth-router.mjs';
 import {createConsolidatedRuntime} from './consolidated-runtime.mjs';
 import {readDiscordChannelPolicy} from './lib/adapters/discord.mjs';
 import {createDiscordRest} from './lib/adapters/discord-rest.mjs';
@@ -27,14 +28,19 @@ export async function prepareGceServer(env,dependencies={}){
  if(backend?.localSingleton!==true)throw Error('SQLite process lock required');
  try{
   const config=await(dependencies.readConfig??readProductionConfig)({...env,PROBE_ORIGIN:origin.origin,PROBE_BUCKET:'local-placeholder-unused',PROBE_AUTH_SECRET_FILE:env.CREDENTIALS_DIRECTORY+'/auth.json',DISCORD_ENABLE:'true',DISCORD_UNATTENDED_ENABLE:'true'});
-  const resource=origin.origin+'/mcp/discord',auth=dependencies.auth??createOAuth({config:{...config,origin:origin.origin+'/discord',resource,discordConsumerOnly:true},backend});
+  const resource=origin.origin+'/mcp/discord',xResource=origin.origin+'/mcp/x';
+  const discordAuth=dependencies.auth??dependencies.discordAuth??createOAuth({config:{...config,origin:origin.origin+'/discord',resource,discordConsumerOnly:true,xEnabled:false},backend});
   const {channelIds,channelScope}=readDiscordChannelPolicy(env),token=(await(dependencies.readSecret??readFile)(env.CREDENTIALS_DIRECTORY+'/bot-token','utf8')).trim();
   await(dependencies.validateDiscord??validateDiscordIntegration)({token,channelIds,channelScope});
   const xConfig=readXWebPushConfig(env);
+  const xAuth=xConfig.enabled?(dependencies.xAuth??createOAuth({config:{...config,origin:origin.origin+'/x',resource:xResource,discordEnabled:false,xEnabled:true,consumerOnly:true,consumerCookiePrefix:'x',oauthStateKey:'oauth-state:x:v1',discordUnattendedEnabled:true},backend})):null;
+  const auth=xAuth?routeSourceOAuth(discordAuth,{discord:discordAuth,x:xAuth}):discordAuth;
   const extraAdapters=xConfig.enabled?[createXWebPushAdapter({sourceId:xConfig.sourceId})]:[];
   const localIngestRoutes=xConfig.enabled?[{path:'/internal/x-web-push',source:'x'}]:[];
+  const sourceResources=xConfig.enabled?{x:xResource}:{};
+  const oauthStateKeys=xConfig.enabled?{[xResource]:'oauth-state:x:v1'}:{};
   const onTiming=dependencies.onTiming??createTimingSink(),reaction=dependencies.reaction??createDiscordEyes({token,channelIds,channelScope,onTiming});
-  const runtime=await createConsolidatedRuntime({backend,auth,resource,channelIds,channelScope,token,reaction,onTiming,inlineMentions:true,extraAdapters,localIngestRoutes,gatewayOwnership:'local-singleton',gatewaySessionKey:'gce-gateway:v1',sendMessage:dependencies.sendMessage??createDiscordRest({token,onTiming}),transport:dependencies.transport??createDiscordCallbackTransport(),...(dependencies.gatewayFactory?{gatewayFactory:dependencies.gatewayFactory}:{}),...(dependencies.timers?{timers:dependencies.timers}:{}),onError:()=>console.error('保存済み状態を保持して処理を一時停止しました'),onGatewayState:(state,code)=>discordDiagnostic('gateway_'+state,{gatewayCode:code}),onFatal:dependencies.onFatal??(()=>{process.exitCode=1;})});
+  const runtime=await createConsolidatedRuntime({backend,auth,resource,sourceResources,oauthStateKeys,channelIds,channelScope,token,reaction,onTiming,inlineMentions:true,extraAdapters,localIngestRoutes,gatewayOwnership:'local-singleton',gatewaySessionKey:'gce-gateway:v1',sendMessage:dependencies.sendMessage??createDiscordRest({token,onTiming}),transport:dependencies.transport??createDiscordCallbackTransport(),...(dependencies.gatewayFactory?{gatewayFactory:dependencies.gatewayFactory}:{}),...(dependencies.timers?{timers:dependencies.timers}:{}),onError:()=>console.error('保存済み状態を保持して処理を一時停止しました'),onGatewayState:(state,code)=>discordDiagnostic('gateway_'+state,{gatewayCode:code}),onFatal:dependencies.onFatal??(()=>{process.exitCode=1;})});
   let shutdown;return {...runtime,backend,shutdown(){return shutdown??=(async()=>{try{await runtime.shutdown();}finally{backend.close();}})();}};
  }catch(error){backend.close();throw error;}
 }

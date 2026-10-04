@@ -10,6 +10,7 @@ import {createEventService,createCombinedHandler} from '../lib/events/service.mj
 import {createSubscriptionAuthorizer} from '../lib/events/authorization.mjs';
 import {createDiscordAdapter,BOT_ID,GUILD_ID} from '../lib/adapters/discord.mjs';
 import {routeConsumerOAuth} from '../production.mjs';
+import {routeSourceOAuth} from '../lib/oauth-router.mjs';
 import {createOidcAdapter} from '../lib/oidc-storage.mjs';
 import {createSqliteObjectBackend} from '../lib/sqlite-store.mjs';
 import {mkdtempSync} from 'node:fs';
@@ -22,6 +23,23 @@ test('Discord OAuthスコープはオプトインでresource束縛',async()=>{
   const enabled=providerConfiguration(config,backend());assert.ok(enabled.scopes.includes('discord:read'));assert.ok(enabled.scopes.includes('discord:reply'));
   const disabled=providerConfiguration({...config,discordEnabled:false},backend());assert.deepEqual(disabled.scopes,['openid','offline_access','probe']);
   assert.equal((await enabled.features.resourceIndicators.getResourceServerInfo({},config.resource)).scope,'probe discord:read discord:reply');
+});
+
+test('X専用consumer issuerはx:readだけを広告し、DiscordとOAuth state/cookieを分離する',async()=>{
+  const b=backend(),xConfig={...config,origin:config.origin+'/x',resource:config.origin+'/mcp/x',discordEnabled:false,xEnabled:true,consumerOnly:true,consumerCookiePrefix:'x',oauthStateKey:'oauth-state:x:v1',discordUnattendedEnabled:true};
+  const x=providerConfiguration(xConfig,b);
+  assert.deepEqual(x.scopes,['openid','offline_access','x:read']);
+  assert.equal(x.clientDefaults.scope,'openid offline_access x:read');
+  assert.equal(x.cookies.names.session,'_x_session');
+  assert.equal((await x.features.resourceIndicators.getResourceServerInfo({},xConfig.resource)).scope,'x:read');
+  const A=x.adapter;await new A('Client').upsert('x-client',{client_id:'x-client'},3600);
+  assert.ok(await b.read('oauth-state:x:v1'));assert.equal(await b.read('oauth-state:v1'),null);
+  const discord=createOAuth({config:{...config,origin:config.origin+'/discord',resource:config.origin+'/mcp/discord',discordConsumerOnly:true},backend:b});
+  const xAuth=createOAuth({config:xConfig,backend:b});
+  const routed=routeSourceOAuth(discord,{discord,x:xAuth});
+  assert.deepEqual(routed.consumerPaths,['/mcp/discord','/mcp/x']);
+  assert.equal(routed.challengeForRequest({url:'/mcp/x'}),xAuth.challenge);
+  assert.equal(routed.challengeForRequest({url:'/mcp/discord'}),discord.challenge);
 });
 
 test('複数ロールのOAuthチャレンジはprobeスコープを誤って要求しない。合成専用の既定は従来のチャレンジを維持',()=>{
@@ -121,6 +139,30 @@ for(const storageKind of ['memory','sqlite'])test('分離コンシューマissue
   const raw=await b.read('oauth-state:v1');const grantId=Object.keys(raw.records).map(k=>JSON.parse(k)).find(([model])=>model==='Grant')[1];
   await b.update('oauth-state:v1',s=>{s.records[JSON.stringify(['Grant',grantId])].payload.rejected={resources:{[consumerConfig.resource]:'discord:read discord:reply'}};return {value:s};});
   assert.equal((await rpc('tools/list')).status,401);assert.equal(await check('google:123',{...command.authorization,name:'discord.mention.created'},['discord:read','discord:reply']),false);
+});
+
+test('X専用issuerは新規clientにx:readだけを付与し、X-only consentを経てtokenを発行する',async t=>{
+  const b=backend(),xConfig={...config,origin:config.origin+'/x',resource:config.origin+'/mcp/x',discordEnabled:false,xEnabled:true,consumerOnly:true,consumerCookiePrefix:'x',oauthStateKey:'oauth-state:x:v1',discordUnattendedEnabled:true};let nonce='';
+  const auth=createOAuth({config:xConfig,backend:b,google:{verifyIdToken:async()=>({getPayload:()=>({iss:'https://accounts.google.com',aud:config.googleClientId,nonce,email:'fixture@gmail.com',email_verified:true,sub:'123'})})}});
+  const routed=routeSourceOAuth(auth,{x:auth});const server=createServer(createRequestListener({auth:routed,store:memoryStore()}));await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>server.close(r)));
+  const base='http://127.0.0.1:'+server.address().port,cookies=new Map();
+  async function call(path,options={}){
+    const url=new URL(path,config.origin);assert.equal(url.origin,config.origin);
+    const r=await fetch(base+url.pathname+url.search,{...options,headers:{host:'probe.example','x-forwarded-proto':'https',cookie:[...cookies].map(([k,v])=>k+'='+v).join('; '),...options.headers},redirect:'manual'});
+    for(const c of r.headers.getSetCookie()){const pair=c.split(';')[0],i=pair.indexOf('=');cookies.set(pair.slice(0,i),pair.slice(i+1));}return r;
+  }
+  const metadata=await (await call('/.well-known/oauth-protected-resource/mcp/x')).json();assert.equal(metadata.resource,xConfig.resource);assert.deepEqual(metadata.scopes_supported,['x:read','openid','offline_access']);
+  const discovery=await (await call('/.well-known/oauth-authorization-server/x')).json();assert.equal(discovery.issuer,xConfig.origin);assert.deepEqual(discovery.scopes_supported,['openid','offline_access','x:read']);
+  const reg=await call('/x/reg',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({redirect_uris:config.redirects,token_endpoint_auth_method:'none',grant_types:['authorization_code','refresh_token'],response_types:['code']})});assert.equal(reg.status,201);const client=await reg.json();assert.equal(client.scope,'openid offline_access x:read');
+  const verifier='EPHEMERAL-X-PKCE-VERIFIER-012345678901234567890';const challenge=createHash('sha256').update(verifier).digest('base64url');
+  const q=new URLSearchParams({client_id:client.client_id,redirect_uri:config.redirects[0],response_type:'code',scope:'openid offline_access x:read',resource:xConfig.resource,code_challenge:challenge,code_challenge_method:'S256',state:'x-test'});
+  const first=await call('/x/auth?'+q);assert.equal(first.status,303);const loginPath=first.headers.get('location');nonce=new URL(loginPath).pathname.split('/').at(-1);
+  const login=await call(loginPath,{method:'POST',headers:{'content-type':'application/json',origin:config.origin},body:JSON.stringify({action:'login',credential:'FAKE-GOOGLE-INPUT'})});assert.equal(login.status,200);
+  const resume=await call((await login.json()).redirect);const consentPath=resume.headers.get('location');const html=await (await call(consentPath)).text();assert.ok(html.includes('X access is read-only'));assert.equal(html.includes('Discord access for guild'),false);
+  const consent=await call(consentPath,{method:'POST',headers:{'content-type':'application/json',origin:config.origin},body:JSON.stringify({action:'consent'})});assert.equal(consent.status,200);
+  const authorized=await call((await consent.json()).redirect);const redirect=new URL(authorized.headers.get('location'));
+  const exchange=await call('/x/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'authorization_code',client_id:client.client_id,code:redirect.searchParams.get('code'),redirect_uri:config.redirects[0],code_verifier:verifier,resource:xConfig.resource})});assert.equal(exchange.status,200);const issued=await exchange.json();
+  const principal=await auth.authenticate({headers:{authorization:'Bearer '+issued.access_token}});assert.equal(principal.resource,xConfig.resource);assert.deepEqual(principal.scopes,['x:read']);assert.ok(principal.grantExpiresAt-Date.now()>89*86400000);
 });
 
 test('コンシューマルーティングはメインissuerを維持し、認証前にエンドポイント固有のチャレンジを返す',async t=>{
