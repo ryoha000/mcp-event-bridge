@@ -11,7 +11,7 @@ import {AsyncLocalStorage} from 'node:async_hooks';
 import {randomUUID} from 'node:crypto';
 // Gateway はこのプロセス内で保持し、外部ブリッジや別プロセスのスプールは存在しない。
 // issuer/状態はこのインスタンスに属し、旧プローブ/コンシューマの許可(grant)はそのまま残る。
-export async function createConsolidatedRuntime({backend,auth,resource,channelIds,token,sendMessage,transport,gatewayFactory=createDiscordGateway,gatewayOwnership='durable-lease',gatewaySessionKey='consolidated-gateway:v1',authorizeSubscription,now=Date.now,timers={setTimeout,clearTimeout},onError=()=>{},onFatal=()=>{},onGatewayState=()=>{},reaction,onTiming=()=>{},inlineMentions=false,channelScope='allowlist',extraAdapters=[],localIngestRoutes=[]}){
+export async function createConsolidatedRuntime({backend,auth,resource,sourceResources={},oauthStateKeys={},channelIds,token,sendMessage,transport,gatewayFactory=createDiscordGateway,gatewayOwnership='durable-lease',gatewaySessionKey='consolidated-gateway:v1',authorizeSubscription,now=Date.now,timers={setTimeout,clearTimeout},onError=()=>{},onFatal=()=>{},onGatewayState=()=>{},reaction,onTiming=()=>{},inlineMentions=false,channelScope='allowlist',extraAdapters=[],localIngestRoutes=[]}){
  if(backend?.durable!==true||!resource?.endsWith('/mcp/discord')||!auth)throw Error('Consolidated runtime configuration refused');
  const mixedRetention={...discordRetention,identityTime:event=>event.source==='discord'?discordRetention.identityTime(event):Date.parse(event.timestamp)};
  const store=createEventStore({backend,retention:mixedRetention,requireLiveSubscription:true,now});
@@ -19,13 +19,19 @@ export async function createConsolidatedRuntime({backend,auth,resource,channelId
  if(!Array.isArray(extraAdapters)||extraAdapters.some(a=>!a||typeof a.source!=='string'||typeof a.normalize!=='function'||typeof a.validate!=='function'))throw Error('Invalid extra event adapters');
  const adapters=[adapter,...extraAdapters];
  if(new Set(adapters.map(a=>a.source)).size!==adapters.length)throw Error('Duplicate event source');
+ const resources={discord:resource,...sourceResources};
+ for(const a of adapters)resources[a.source]??=resource;
+ const resourceSources=new Map();
+ for(const [source,target] of Object.entries(resources)){if(typeof target!=='string'||!target.startsWith('https://'))throw Error('Invalid source resource');const set=resourceSources.get(target)??new Set();set.add(source);resourceSources.set(target,set);}
+ const allowedResources=[...resourceSources.keys()];
+ const resourcePaths=new Set(allowedResources.map(target=>new URL(target).pathname));
  const ingestRoutes=new Map();
  for(const route of localIngestRoutes){
   if(!route||typeof route.path!=='string'||!route.path.startsWith('/internal/')||typeof route.source!=='string'||!adapters.some(a=>a.source===route.source)||ingestRoutes.has(route.path))throw Error('Invalid local ingest route');
   ingestRoutes.set(route.path,route.source);
  }
  const requestContext=new AsyncLocalStorage(),timing=(phase,details)=>{try{onTiming(phase,details);}catch{}};
- const authorize=authorizeSubscription??createSubscriptionAuthorizer({backend,resource});
+ const authorize=authorizeSubscription??createSubscriptionAuthorizer({backend,resource,allowedResources,stateKeyForResource:target=>oauthStateKeys[target]??'oauth-state:v1'});
  const callbackData=event=>{const sourceAdapter=adapters.find(a=>a.source===event.source);return sourceAdapter?.callbackData?sourceAdapter.callbackData(event):{event_id:event.eventId,source:event.source,guild_id:event.origin.tenantId};};
  const worker=createLocalEventWorker({store,adapter,callbackData,transport,authorizeSubscription:authorize,now,timers,onError,onTiming:timing});
  const events=createEventService({store,adapters,transport,queueReplies:true,authorizeQueuedReply:authorize,subscriptionTtlMs:8*3600000,diagnosticSink:()=>{},statusConfiguration:{channelAllowlistCount:channelScope==='allowlist'?channelIds.length:null,channelAccessPolicy:channelScope,replyExecution:'queued_locally',mechanicalEyesEnabled:!!reaction,inlineMentionPayload:inlineMentions}});
@@ -51,11 +57,12 @@ export async function createConsolidatedRuntime({backend,auth,resource,channelId
   },onFatal:()=>{stop();try{onFatal();}catch{}}});
  function stop(){stopped=true;timers.clearTimeout(pressureTimer);releasePressure?.();worker.stop();gateway.stop();}
  const listener=createRequestListener({auth:{...auth,discordConsumerEnabled:true},store:memoryStore(),handlerFactory:probe=>{
-  const handle=createCombinedHandler(probe,events,{consumerResource:resource,diagnosticSink:()=>{}});
+  const handle=createCombinedHandler(probe,events,{consumerResources:allowedResources,diagnosticSink:()=>{}});
   return async(method,params,owner,principal)=>{
    if(stopped)throw Error('Consolidated runtime stopping');
-   const allowedScopes=new Set(adapters.flatMap(a=>[a.source+':read',...(typeof a.reply==='function'?[a.source+':reply']:[])]));
-   if(principal.resource!==resource||principal.scopes?.some(s=>!allowedScopes.has(s)))throw Error('Consumer scopes required');
+   const sourceSet=resourceSources.get(principal.resource);if(!sourceSet)throw Error('Consumer resource required');
+   const allowedScopes=new Set(adapters.filter(a=>sourceSet.has(a.source)).flatMap(a=>[a.source+':read',...(typeof a.reply==='function'?[a.source+':reply']:[])]));
+   if(principal.scopes?.some(scope=>!allowedScopes.has(scope)))throw Error('Consumer scopes required');
    const requestTrace=requestContext.getStore()?.requestTrace,eventId=params?.arguments?.event_id,action=method==='tools/call'?params?.name:method,began=performance.now();
    timing('mcp_handler_started',{requestTrace,eventId,action});let result;
    try{result=await handle(method,params,owner,principal);}finally{timing('mcp_handler_completed',{requestTrace,eventId,action,durationMs:performance.now()-began});}
@@ -84,7 +91,7 @@ export async function createConsolidatedRuntime({backend,auth,resource,channelId
    }catch{res.writeHead(422,{'cache-control':'no-store'});res.end();}
    return;
   }
-  if(path===new URL(resource).pathname){const requestTrace=randomUUID(),began=performance.now();res.setHeader('X-Discord-Trace',requestTrace);timing('mcp_request_received',{requestTrace});res.once('finish',()=>timing('mcp_request_completed',{requestTrace,httpStatus:res.statusCode,durationMs:performance.now()-began}));await requestContext.run({requestTrace},()=>listener(req,res));}
+  if(resourcePaths.has(path)){const requestTrace=randomUUID(),began=performance.now();res.setHeader('X-MCP-Trace',requestTrace);if(path===new URL(resource).pathname)res.setHeader('X-Discord-Trace',requestTrace);timing('mcp_request_received',{requestTrace});res.once('finish',()=>timing('mcp_request_completed',{requestTrace,httpStatus:res.statusCode,durationMs:performance.now()-began}));await requestContext.run({requestTrace},()=>listener(req,res));}
   else await listener(req,res);
  };
  try{
