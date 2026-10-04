@@ -231,6 +231,8 @@ Cookie をローテーションした場合は Secret Manager に新 version を
 
 ## dot / ChatGPT 側
 
+`x_status` はイベントがない状態でも認証済みの読み取りに成功する接続確認用ツールです。設定済みソースと、そのオーナー・Xソースのイベント／subscription／配送件数だけを返し、通知本文、アカウント識別子、認証情報は返しません。listenerの稼働やAutoPush接続を直接確認する機能ではありません。`x_read_event` は保存済みイベントIDがある場合に使います。
+
 X は既存の Discord plugin へ追加せず、別 plugin として登録する。
 
 - 表示名の例: `MCP Event Bridge(X)`
