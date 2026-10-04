@@ -10,6 +10,7 @@ import {createEventService,createCombinedHandler} from '../lib/events/service.mj
 import {createSubscriptionAuthorizer} from '../lib/events/authorization.mjs';
 import {createDiscordAdapter,BOT_ID,GUILD_ID} from '../lib/adapters/discord.mjs';
 import {routeConsumerOAuth} from '../production.mjs';
+import {routeSourceOAuth} from '../lib/oauth-router.mjs';
 import {createOidcAdapter} from '../lib/oidc-storage.mjs';
 import {createSqliteObjectBackend} from '../lib/sqlite-store.mjs';
 import {mkdtempSync} from 'node:fs';
@@ -22,6 +23,23 @@ test('Discord OAuthスコープはオプトインでresource束縛',async()=>{
   const enabled=providerConfiguration(config,backend());assert.ok(enabled.scopes.includes('discord:read'));assert.ok(enabled.scopes.includes('discord:reply'));
   const disabled=providerConfiguration({...config,discordEnabled:false},backend());assert.deepEqual(disabled.scopes,['openid','offline_access','probe']);
   assert.equal((await enabled.features.resourceIndicators.getResourceServerInfo({},config.resource)).scope,'probe discord:read discord:reply');
+});
+
+test('X専用consumer issuerはx:readだけを広告し、DiscordとOAuth state/cookieを分離する',async()=>{
+  const b=backend(),xConfig={...config,origin:config.origin+'/x',resource:config.origin+'/mcp/x',discordEnabled:false,xEnabled:true,consumerOnly:true,consumerCookiePrefix:'x',oauthStateKey:'oauth-state:x:v1',discordUnattendedEnabled:true};
+  const x=providerConfiguration(xConfig,b);
+  assert.deepEqual(x.scopes,['openid','offline_access','x:read']);
+  assert.equal(x.clientDefaults.scope,'openid offline_access x:read');
+  assert.equal(x.cookies.names.session,'_x_session');
+  assert.equal((await x.features.resourceIndicators.getResourceServerInfo({},xConfig.resource)).scope,'x:read');
+  const A=x.adapter;await new A('Client').upsert('x-client',{client_id:'x-client'},3600);
+  assert.ok(await b.read('oauth-state:x:v1'));assert.equal(await b.read('oauth-state:v1'),null);
+  const discord=createOAuth({config:{...config,origin:config.origin+'/discord',resource:config.origin+'/mcp/discord',discordConsumerOnly:true},backend:b});
+  const xAuth=createOAuth({config:xConfig,backend:b});
+  const routed=routeSourceOAuth(discord,{discord,x:xAuth});
+  assert.deepEqual(routed.consumerPaths,['/mcp/discord','/mcp/x']);
+  assert.equal(routed.challengeForRequest({url:'/mcp/x'}),xAuth.challenge);
+  assert.equal(routed.challengeForRequest({url:'/mcp/discord'}),discord.challenge);
 });
 
 test('複数ロールのOAuthチャレンジはprobeスコープを誤って要求しない。合成専用の既定は従来のチャレンジを維持',()=>{
