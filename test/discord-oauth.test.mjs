@@ -141,6 +141,29 @@ for(const storageKind of ['memory','sqlite'])test('分離コンシューマissue
   assert.equal((await rpc('tools/list')).status,401);assert.equal(await check('google:123',{...command.authorization,name:'discord.mention.created'},['discord:read','discord:reply']),false);
 });
 
+test('X専用issuerは新規clientにx:readだけを付与し、X-only consentを経てtokenを発行する',async t=>{
+  const b=backend(),xConfig={...config,origin:config.origin+'/x',resource:config.origin+'/mcp/x',discordEnabled:false,xEnabled:true,consumerOnly:true,consumerCookiePrefix:'x',oauthStateKey:'oauth-state:x:v1',discordUnattendedEnabled:true};let nonce='';
+  const auth=createOAuth({config:xConfig,backend:b,google:{verifyIdToken:async()=>({getPayload:()=>({iss:'https://accounts.google.com',aud:config.googleClientId,nonce,email:'fixture@gmail.com',email_verified:true,sub:'123'})})}});
+  const routed=routeSourceOAuth(auth,{x:auth});const server=createServer(createRequestListener({auth:routed,store:memoryStore()}));await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>server.close(r)));
+  const base='http://127.0.0.1:'+server.address().port,cookies=new Map();
+  async function call(path,options={}){
+    const r=await fetch(base+path,{...options,headers:{host:'probe.example','x-forwarded-proto':'https',cookie:[...cookies].map(([k,v])=>k+'='+v).join('; '),...options.headers},redirect:'manual'});
+    for(const c of r.headers.getSetCookie()){const pair=c.split(';')[0],i=pair.indexOf('=');cookies.set(pair.slice(0,i),pair.slice(i+1));}return r;
+  }
+  const metadata=await (await call('/.well-known/oauth-protected-resource/mcp/x')).json();assert.equal(metadata.resource,xConfig.resource);assert.deepEqual(metadata.scopes_supported,['x:read','openid','offline_access']);
+  const discovery=await (await call('/.well-known/oauth-authorization-server/x')).json();assert.equal(discovery.issuer,xConfig.origin);assert.deepEqual(discovery.scopes_supported,['openid','offline_access','x:read']);
+  const reg=await call('/x/reg',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({redirect_uris:config.redirects,token_endpoint_auth_method:'none',grant_types:['authorization_code','refresh_token'],response_types:['code']})});assert.equal(reg.status,201);const client=await reg.json();assert.equal(client.scope,'openid offline_access x:read');
+  const verifier='EPHEMERAL-X-PKCE-VERIFIER-012345678901234567890';const challenge=createHash('sha256').update(verifier).digest('base64url');
+  const q=new URLSearchParams({client_id:client.client_id,redirect_uri:config.redirects[0],response_type:'code',scope:'openid offline_access x:read',resource:xConfig.resource,code_challenge:challenge,code_challenge_method:'S256',state:'x-test'});
+  const first=await call('/x/auth?'+q);assert.equal(first.status,303);const loginPath=first.headers.get('location');nonce=new URL(loginPath).pathname.split('/').at(-1);
+  const login=await call(loginPath,{method:'POST',headers:{'content-type':'application/json',origin:config.origin},body:JSON.stringify({action:'login',credential:'FAKE-GOOGLE-INPUT'})});assert.equal(login.status,200);
+  const resume=await call((await login.json()).redirect);const consentPath=resume.headers.get('location');const html=await (await call(consentPath)).text();assert.ok(html.includes('X access is read-only'));assert.equal(html.includes('Discord access for guild'),false);
+  const consent=await call(consentPath,{method:'POST',headers:{'content-type':'application/json',origin:config.origin},body:JSON.stringify({action:'consent'})});assert.equal(consent.status,200);
+  const authorized=await call((await consent.json()).redirect);const redirect=new URL(authorized.headers.get('location'));
+  const exchange=await call('/x/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'authorization_code',client_id:client.client_id,code:redirect.searchParams.get('code'),redirect_uri:config.redirects[0],code_verifier:verifier,resource:xConfig.resource})});assert.equal(exchange.status,200);const issued=await exchange.json();
+  const principal=await auth.authenticate({headers:{authorization:'Bearer '+issued.access_token}});assert.equal(principal.resource,xConfig.resource);assert.deepEqual(principal.scopes,['x:read']);assert.ok(principal.grantExpiresAt-Date.now()>89*86400000);
+});
+
 test('コンシューマルーティングはメインissuerを維持し、認証前にエンドポイント固有のチャレンジを返す',async t=>{
  const main=createOAuth({config,backend:backend()}),consumer=createOAuth({config:{...config,origin:config.origin+'/discord',resource:config.origin+'/mcp/discord',discordConsumerOnly:true},backend:backend()});
  const routed=routeConsumerOAuth(main,consumer);const server=createServer(createRequestListener({auth:routed,store:memoryStore()}));await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>server.close(r)));const base='http://127.0.0.1:'+server.address().port;
