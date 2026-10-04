@@ -36,6 +36,121 @@ X_WEB_PUSH_SOURCE_ID=@your_handle
 
 公開 nginx 設定は `/internal/x-web-push` を proxy しない。Angelic-Angel は同一 VM 上から直接 `127.0.0.1:8080` へ POST する。
 
+## Terraform / Secret Manager の準備
+
+このリポジトリの Terraform は `terraform apply` で次の Secret Manager **コンテナ**と、VM service account の `secretAccessor` を作成する。
+
+- `x-monitor-auth-token`
+- `x-monitor-ct0`
+
+Secret の値（version）は Terraform では作らない。Cookie を Terraform state に入れないため、値は `gcloud secrets versions add` で別途投入する。
+
+```sh
+cp infra/terraform.tfvars.example infra/terraform.tfvars
+# terraform.tfvars の project_id / project_number / github_repo / admin_members を自分の環境に合わせる
+
+terraform -chdir=infra init
+terraform -chdir=infra plan
+terraform -chdir=infra apply
+
+terraform -chdir=infra output x_secret_names
+```
+
+## X Cookie の取得
+
+監視専用 X アカウントを用意し、そのアカウントで対象アカウントをフォローして投稿通知を ON にする。
+
+1. ブラウザで監視専用アカウントとして `https://x.com` にログインする。
+2. DevTools を開く。
+3. Chrome/Chromium 系なら **Application → Storage → Cookies → https://x.com**、Firefox なら **Storage → Cookies → https://x.com** を開く。
+4. `auth_token` の Value を控える。
+5. `ct0` の Value を控える。
+
+これらはログインセッション資格情報なので、チャット・Issue・PR・`.env`・shell history に貼らない。
+
+macOS/Linux の端末から値を履歴に残しにくく投入する例:
+
+```sh
+export PROJECT_ID='<your-gcp-project>'
+
+read -s X_AUTH_TOKEN
+printf '%s' "$X_AUTH_TOKEN" | gcloud secrets versions add x-monitor-auth-token \
+  --project="$PROJECT_ID" --data-file=-
+unset X_AUTH_TOKEN
+
+read -s X_CT0
+printf '%s' "$X_CT0" | gcloud secrets versions add x-monitor-ct0 \
+  --project="$PROJECT_ID" --data-file=-
+unset X_CT0
+```
+
+値を表示せず、version が作られたことだけ確認する:
+
+```sh
+gcloud secrets versions list x-monitor-auth-token --project="$PROJECT_ID"
+gcloud secrets versions list x-monitor-ct0 --project="$PROJECT_ID"
+```
+
+## bridge のデプロイ
+
+ローカルデプロイでは `.env.example` を `.env` にコピーし、既存の必須値に加えて X を有効化する。
+
+```sh
+X_WEB_PUSH_ENABLE=true
+X_WEB_PUSH_SOURCE_ID=@your_target_handle
+```
+
+`auth_token` / `ct0` の実値は `.env` に書かない。
+
+```sh
+npm ci --ignore-scripts
+npm run check
+npm test
+npm run deploy -- --dry-run
+npm run deploy
+```
+
+GitHub Actions の CD を使う場合は、`production` environment の variables に次を追加する。
+
+```text
+X_WEB_PUSH_ENABLE=true
+X_WEB_PUSH_SOURCE_ID=@your_target_handle
+```
+
+Secret Manager の名前をデフォルトから変えない限り、GitHub Actions に X Cookie の値や Secret 名を追加する必要はない。
+
+`npm run deploy` は bridge、Secret Manager loader の設定、nginx、systemd unit を VM に配置する。ただし Angelic-Angel バイナリの初回ビルド/インストールは別途1回必要。
+
+## Angelic-Angel の初回インストール
+
+VM に IAP SSH する。
+
+```sh
+gcloud compute ssh <instance-name> \
+  --project <project-id> \
+  --zone <zone> \
+  --tunnel-through-iap
+```
+
+VM 上で Rust stable を用意し、credential 対応をマージ済みの fork を固定 revision からビルドする。現在この機能を含む merge commit は `f891d282a2dfd88001a7b95434af9c6395071706`。
+
+```sh
+sudo apt-get update
+sudo apt-get install -y build-essential curl ca-certificates
+
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh
+sh /tmp/rustup.sh -y --profile minimal
+. "$HOME/.cargo/env"
+
+cargo install --locked \
+  --git https://github.com/ryoha000/Angelic-Angel \
+  --rev f891d282a2dfd88001a7b95434af9c6395071706 \
+  angelic-angel
+
+sudo install -m 0755 "$HOME/.cargo/bin/angelic-angel" /usr/local/bin/angelic-angel
+/usr/local/bin/angelic-angel --help
+```
+
 ## Angelic-Angel の設定
 
 この構成では systemd credentials 対応済みの [ryoha000/Angelic-Angel](https://github.com/ryoha000/Angelic-Angel) を使う。ブラウザ常駐は不要で、X Cookie は TOML に保存しない。
