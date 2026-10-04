@@ -76,6 +76,8 @@ gh variable set DEPLOY_ZONE --env production -b "<ゾーン>"
 gh variable set DEPLOY_INSTANCE --env production -b "<インスタンス名>"
 gh variable set DEPLOY_NODE_VERSION --env production -b "22.23.3"
 gh variable set GOOGLE_ALLOWED_EMAIL --env production -b "<オーナーのメール>"
+# X Web Push を使う場合だけ設定。未設定/空なら無効。
+gh variable set X_WEB_PUSH_SOURCE_ID --env production -b "@your_target_handle"
 
 gh secret set GCP_WIF_PROVIDER --env production -b "$(terraform -chdir=infra output -raw wif_provider)"
 gh secret set GCP_DEPLOY_SA --env production -b "$(terraform -chdir=infra output -raw deploy_service_account)"
