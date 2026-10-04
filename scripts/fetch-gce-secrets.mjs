@@ -28,9 +28,16 @@ export async function fetchGceSecrets({fetchImpl=fetch,writeSecret=writePrivate}
   }
   const bot=await secret(process.env.MCP_DISCORD_BOT_SECRET??'discord-mention-bot-token',process.env.MCP_DISCORD_BOT_SECRET_VERSION??'latest'),auth=await secret(process.env.MCP_AUTH_SECRET??'discord-consolidated-auth',process.env.MCP_AUTH_SECRET_VERSION??'latest');
   const token=bot.toString('utf8').trim();if(!token||token.length>4096||/\s/.test(token))throw Error();authValid(auth);
-  // 2つのペア全体を検証してから、ランタイムファイルを公開する。
+  const xEnabled=process.env.X_WEB_PUSH_ENABLE==='true';let xAuthToken,xCt0;
+  if(xEnabled){
+   xAuthToken=await secret(process.env.MCP_X_AUTH_TOKEN_SECRET??'x-monitor-auth-token',process.env.MCP_X_AUTH_TOKEN_SECRET_VERSION??'latest');
+   xCt0=await secret(process.env.MCP_X_CT0_SECRET??'x-monitor-ct0',process.env.MCP_X_CT0_SECRET_VERSION??'latest');
+   for(const bytes of [xAuthToken,xCt0]){const value=bytes.toString('utf8').trim();if(!value||value.length>8192||/\s/.test(value))throw Error();}
+  }
+  // すべての値を検証してから、root限定の /run ファイルを公開する。
   await writeSecret('bot-token',bot);await writeSecret('auth.json',auth);
-  return {loaded:true,versionsVerified:true};
+  if(xEnabled){await writeSecret('x-auth-token',xAuthToken);await writeSecret('x-ct0',xCt0);}
+  return {loaded:true,versionsVerified:true,xLoaded:xEnabled};
  }catch{throw Error('VMの秘密情報を安全に読み込めませんでした。秘密値は表示していません');}
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){try{await fetchGceSecrets();console.info('2つの秘密情報を一時メモリへ読み込みました');}catch{console.error('秘密情報の読み込みを拒否しました。秘密値は表示していません');process.exitCode=1;}}
+if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){try{const result=await fetchGceSecrets();console.info(result.xLoaded?'4つの秘密情報を一時メモリへ読み込みました':'2つの秘密情報を一時メモリへ読み込みました');}catch{console.error('秘密情報の読み込みを拒否しました。秘密値は表示していません');process.exitCode=1;}}
