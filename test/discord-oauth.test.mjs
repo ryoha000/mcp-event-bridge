@@ -147,7 +147,8 @@ test('X専用issuerは新規clientにx:readだけを付与し、X-only consent�
   const routed=routeSourceOAuth(auth,{x:auth});const server=createServer(createRequestListener({auth:routed,store:memoryStore()}));await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>server.close(r)));
   const base='http://127.0.0.1:'+server.address().port,cookies=new Map();
   async function call(path,options={}){
-    const r=await fetch(base+path,{...options,headers:{host:'probe.example','x-forwarded-proto':'https',cookie:[...cookies].map(([k,v])=>k+'='+v).join('; '),...options.headers},redirect:'manual'});
+    const url=new URL(path,config.origin);assert.equal(url.origin,config.origin);
+    const r=await fetch(base+url.pathname+url.search,{...options,headers:{host:'probe.example','x-forwarded-proto':'https',cookie:[...cookies].map(([k,v])=>k+'='+v).join('; '),...options.headers},redirect:'manual'});
     for(const c of r.headers.getSetCookie()){const pair=c.split(';')[0],i=pair.indexOf('=');cookies.set(pair.slice(0,i),pair.slice(i+1));}return r;
   }
   const metadata=await (await call('/.well-known/oauth-protected-resource/mcp/x')).json();assert.equal(metadata.resource,xConfig.resource);assert.deepEqual(metadata.scopes_supported,['x:read','openid','offline_access']);
