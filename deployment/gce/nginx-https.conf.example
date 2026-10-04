@@ -31,7 +31,9 @@ server {
     client_body_timeout 15s;
     add_header Strict-Transport-Security "max-age=86400" always;
     location = /mcp/discord { access_log /var/log/nginx/discord-mcp-timing.log discord_mcp_timing; include /etc/nginx/snippets/discord-mcp-proxy.conf; }
+    location = /mcp/x { include /etc/nginx/snippets/discord-mcp-proxy.conf; }
     location ^~ /discord/ { include /etc/nginx/snippets/discord-mcp-proxy.conf; }
+    location ^~ /x/ { include /etc/nginx/snippets/discord-mcp-proxy.conf; }
     location ^~ /.well-known/ { include /etc/nginx/snippets/discord-mcp-proxy.conf; }
     location = /healthz { include /etc/nginx/snippets/discord-mcp-proxy.conf; }
     location / { return 404; }
