@@ -85,7 +85,7 @@ async function deploy(envPath,dryRun){
    await writeFile(join(staging,target),renderGceTemplate(await readFile(new URL(source_,dir),'utf8'),settings));
   }
   await writeFile(join(staging,'runtime.env'),applyEnvOverrides(renderGceTemplate(envTemplate,settings),settings),{mode:0o600});
-  for(const name of ['nginx-timing.conf','nginx-timing-logrotate.conf','discord-mcp.service','discord-mcp-secrets.service','install.sh'])await copyFile(new URL(name,dir),join(staging,name));
+  for(const name of ['nginx-timing.conf','nginx-timing-logrotate.conf','discord-mcp.service','discord-mcp-secrets.service','angelic-angel.service.example','install.sh'])await copyFile(new URL(name,dir),join(staging,name));
   run('git',['archive','--format=tar','HEAD','-o',join(staging,'app.tar')]);
   await writeFile(join(staging,'revision'),revision+'\n');
   if(dryRun){console.info('dry-run: ペイロードを検証しました（リモートには触れていません）');return;}
