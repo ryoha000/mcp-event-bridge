@@ -3,6 +3,7 @@ import {createPrivateKey,randomUUID} from 'node:crypto';
 import {resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {CRC32C} from '@google-cloud/storage';
+import {readXWebPushConfig} from '../lib/adapters/x-web-push.mjs';
 
 const project=process.env.MCP_GCP_PROJECT??'example-project',projectNumber=process.env.MCP_GCP_PROJECT_NUMBER??'123456789012';
 const identity=process.env.MCP_GCP_SERVICE_ACCOUNT??'discord-mcp-gce@'+project+'.iam.gserviceaccount.com';
@@ -28,7 +29,7 @@ export async function fetchGceSecrets({fetchImpl=fetch,writeSecret=writePrivate}
   }
   const bot=await secret(process.env.MCP_DISCORD_BOT_SECRET??'discord-mention-bot-token',process.env.MCP_DISCORD_BOT_SECRET_VERSION??'latest'),auth=await secret(process.env.MCP_AUTH_SECRET??'discord-consolidated-auth',process.env.MCP_AUTH_SECRET_VERSION??'latest');
   const token=bot.toString('utf8').trim();if(!token||token.length>4096||/\s/.test(token))throw Error();authValid(auth);
-  const xEnabled=process.env.X_WEB_PUSH_ENABLE==='true';let xAuthToken,xCt0;
+  const xEnabled=readXWebPushConfig(process.env).enabled;let xAuthToken,xCt0;
   if(xEnabled){
    xAuthToken=await secret(process.env.MCP_X_AUTH_TOKEN_SECRET??'x-monitor-auth-token',process.env.MCP_X_AUTH_TOKEN_SECRET_VERSION??'latest');
    xCt0=await secret(process.env.MCP_X_CT0_SECRET??'x-monitor-ct0',process.env.MCP_X_CT0_SECRET_VERSION??'latest');
