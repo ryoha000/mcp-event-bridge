@@ -13,7 +13,8 @@ import {randomUUID} from 'node:crypto';
 // issuer/状態はこのインスタンスに属し、旧プローブ/コンシューマの許可(grant)はそのまま残る。
 export async function createConsolidatedRuntime({backend,auth,resource,channelIds,token,sendMessage,transport,gatewayFactory=createDiscordGateway,gatewayOwnership='durable-lease',gatewaySessionKey='consolidated-gateway:v1',authorizeSubscription,now=Date.now,timers={setTimeout,clearTimeout},onError=()=>{},onFatal=()=>{},onGatewayState=()=>{},reaction,onTiming=()=>{},inlineMentions=false,channelScope='allowlist',extraAdapters=[],localIngestRoutes=[]}){
  if(backend?.durable!==true||!resource?.endsWith('/mcp/discord')||!auth)throw Error('Consolidated runtime configuration refused');
- const store=createEventStore({backend,retention:discordRetention,requireLiveSubscription:true,now});
+ const mixedRetention={...discordRetention,identityTime:event=>event.source==='discord'?discordRetention.identityTime(event):Date.parse(event.timestamp)};
+ const store=createEventStore({backend,retention:mixedRetention,requireLiveSubscription:true,now});
  const adapter=createDiscordAdapter({channelIds,sendMessage,inlineMentions,channelScope});
  if(!Array.isArray(extraAdapters)||extraAdapters.some(a=>!a||typeof a.source!=='string'||typeof a.normalize!=='function'||typeof a.validate!=='function'))throw Error('Invalid extra event adapters');
  const adapters=[adapter,...extraAdapters];
