@@ -34,6 +34,14 @@ bot には対象ギルド/チャンネルへのアクセス、Gateway の guild 
 
 このリポジトリは汎用的な例とフェイクのフィクスチャのみを含み、デプロイ履歴や実運用設定は含まない。
 
+## X Web Push (Angelic-Angel)
+
+任意で [Angelic-Angel](https://github.com/sh1ma/Angelic-Angel) を同一 VM に常駐させ、raw X Web Push JSON を `x.web_push.received` として同じ MCP Events 接続へ流せる。ブラウザの常駐は不要で、Angelic-Angel 自体が Mozilla AutoPush への WebSocket を維持する。
+
+`X_WEB_PUSH_ENABLE=true` と安定した `X_WEB_PUSH_SOURCE_ID` を設定し、Angelic-Angel の `WEBHOOK_ENDPOINT` を `http://127.0.0.1:8080/internal/x-web-push` にする。nginx の公開設定はこの内部 ingest path を公開しない。
+
+X Cookie (`auth_token`, `ct0`) はソース管理に入れない。現行 Angelic-Angel は Cookie と Web Push 登録状態を同じ TOML に永続化するため、専用ユーザー所有・mode `0600` の state file として扱う。詳しい構成、監視専用 X アカウント、Secret Manager の制約は [docs/x-web-push.md](docs/x-web-push.md) を参照。
+
 ## プロビジョニングとデプロイの自動化
 
 `infra/` には上記の単一 VM 構成（インスタンス、IAM、Secret Manager のコンテナ、ファイアウォール、固定 IP、GitHub Actions 用 Workload Identity Federation）を定義した Terraform がある。`terraform.tfvars.example` をコピーして apply し、シークレットのバージョンは後から Secret Manager に追加する。
