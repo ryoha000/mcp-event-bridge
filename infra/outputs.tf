@@ -28,3 +28,11 @@ output "deploy_service_account" {
 output "ssh_hint" {
   value = "gcloud compute ssh ${var.instance_name} --project ${var.project_id} --zone ${var.zone} --tunnel-through-iap"
 }
+
+output "x_secret_names" {
+  description = "X Web Push 用 Secret Manager コンテナ名。値の version は別途投入する。"
+  value = {
+    auth_token = google_secret_manager_secret.x_auth_token.secret_id
+    ct0        = google_secret_manager_secret.x_ct0.secret_id
+  }
+}
