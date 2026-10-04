@@ -83,6 +83,10 @@ for unit in discord-mcp-secrets.service discord-mcp.service; do
     CHANGED=1
   fi
 done
+if ! cmp -s "$DEPLOY_DIR/angelic-angel.service.example" "/etc/systemd/system/angelic-angel.service"; then
+  install -m 0644 "$DEPLOY_DIR/angelic-angel.service.example" "/etc/systemd/system/angelic-angel.service"
+  UNIT_CHANGED=1
+fi
 if [ "$UNIT_CHANGED" = 1 ]; then systemctl daemon-reload; fi
 
 # --- nginx スニペット/logrotate ---
