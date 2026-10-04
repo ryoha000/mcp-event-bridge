@@ -21,8 +21,9 @@ export function createRequestListener({auth, store, transport = callbackTranspor
     try {
       if (req.url === '/healthz' && req.method === 'GET') { json(res, 200, {ok:true}); return; }
       if (await auth.handleHttp(req, res)) return;
-      const discordConsumer=req.url==='/mcp/discord'&&auth.discordConsumerEnabled===true;
-      if (req.url !== '/mcp'&&!discordConsumer) { json(res, 404, {error:'Not found'}); return; }
+      const consumerPaths=Array.isArray(auth.consumerPaths)?auth.consumerPaths:[];
+      const sourceConsumer=consumerPaths.includes(req.url)||(req.url==='/mcp/discord'&&auth.discordConsumerEnabled===true);
+      if (req.url !== '/mcp'&&!sourceConsumer) { json(res, 404, {error:'Not found'}); return; }
       // ディスカバリにも認証を要求する。メタデータは auth アダプタ経由で提供する。
       const principal = await auth.authenticate(req);
       if (!principal || typeof principal.owner !== 'string' || !principal.owner || principal.owner.length > 512) {
