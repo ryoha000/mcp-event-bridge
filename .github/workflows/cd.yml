@@ -51,3 +51,4 @@ jobs:
           DISCORD_BOT_ID: ${{ secrets.DISCORD_BOT_ID }}
           GOOGLE_ALLOWED_EMAIL: ${{ vars.GOOGLE_ALLOWED_EMAIL }}
           X_WEB_PUSH_SOURCE_ID: ${{ vars.X_WEB_PUSH_SOURCE_ID }}
+          X_WEB_PUSH_TWEET_API: ${{ vars.X_WEB_PUSH_TWEET_API || 'https://api.fxtwitter.com' }}

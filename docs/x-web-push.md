@@ -21,7 +21,7 @@ Angelic-Angel 自体が Firefox 相当の Web Push クライアントとして M
 2. 対象アカウントの投稿通知を有効にする。
 3. 監視専用アカウントの `auth_token` と `ct0` を Angelic-Angel に設定する。
 
-bridge は通知 JSON を解釈・要約せず、`x.web_push.received` の `data.payload` としてそのまま dot に配送する。X への書き込み機能や `x:reply` スコープは提供しない。
+bridge は通知 JSON を解釈・要約せず、`x.web_push.received` の `data.payload` としてそのまま dot に配送する。ただし通知に status URL が含まれる場合、ingest 時に `data.tweet` へ縮約したツイート本文・メディア URL を添える（後述）。X への書き込み機能や `x:reply` スコープは提供しない。
 
 ## bridge の設定
 
@@ -29,9 +29,12 @@ bridge は通知 JSON を解釈・要約せず、`x.web_push.received` の `data
 
 ```sh
 X_WEB_PUSH_SOURCE_ID=@your_handle
+X_WEB_PUSH_TWEET_API=https://api.fxtwitter.com
 ```
 
 `X_WEB_PUSH_SOURCE_ID` は秘密ではない。イベントの tenant/source identity を安定させるためのラベルで、監視対象の handle などを使う。
+
+`X_WEB_PUSH_TWEET_API` は通知内の status URL からツイート本文・メディア URL を補完する fxtwitter 互換 API の HTTPS ベース URL で、既定は `https://api.fxtwitter.com`。bridge は `https://{X_WEB_PUSH_TWEET_API}/{user}/status/{id}`（URL に user が無い `i/web/status` 形式なら `/status/{id}`）に GET するだけで、通知内の URL をそのまま fetch しない。タイムアウトや取得失敗でもイベントは破棄せず、通知自体が持つ本文・アイコン等から組み立てた `partial: true` の tweet を添える。`none` にすると外部 API を呼ばず、常に通知由来の `partial: true` tweet のみを添える。
 
 公開 nginx 設定は `/internal/x-web-push` を proxy しない。Angelic-Angel は同一 VM 上から直接 `127.0.0.1:8080` へ POST する。公開側では Discord を `/mcp/discord`、X を `/mcp/x` に分離し、X の OAuth issuer は `/x` を使う。
 
@@ -270,8 +273,17 @@ callback の `data` は次の形で、`payload` が Angelic-Angel から受け�
   "source_id": "@your_handle",
   "timestamp": "2026-10-05T00:00:00.000Z",
   "payload": {},
+  "tweet": {
+    "url": "https://x.com/you/status/1",
+    "id": "1",
+    "text": "...",
+    "author": {"name": "...", "screen_name": "you"},
+    "media": {"photos": [{"url": "https://pbs.twimg.com/..."}]}
+  },
   "context_policy": "origin_event_only"
 }
 ```
+
+`tweet` は通知に status URL が含まれるとき付く。補完成功時は fxtwitter 由来の縮約データ（本文全文・投稿者名・写真/動画 URL・エンゲージメント数・引用ツイート1段）。補完失敗時や `X_WEB_PUSH_TWEET_API=none` のときは通知自体のフィールド（`title`/`body`/`icon`/`timestamp`/`image`/`data.lang`）から組み立てた `partial: true` の tweet になる。status URL を含まない通知ではキー自体が無い。`payload` と同様に非信頼データとして扱うこと。
 
 同一 raw payload は内容ハッシュ由来の event ID で重複排除する。

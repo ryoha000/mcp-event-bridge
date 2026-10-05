@@ -40,6 +40,8 @@ bot には対象ギルド/チャンネルへのアクセス、Gateway の guild 
 
 安定した `X_WEB_PUSH_SOURCE_ID` を設定すると X Web Push が有効になる。未設定または空なら無効。公開 MCP は Discord の `https://<host>/mcp/discord` と X の `https://<host>/mcp/x` に分離され、X 側は `x:read` のみを広告する。Angelic-Angel の `WEBHOOK_ENDPOINT` は `http://127.0.0.1:8080/internal/x-web-push` のままで、nginx はこの内部 ingest path を公開しない。
 
+通知に status URL が含まれる場合、既定で `api.fxtwitter.com` 越しに縮約したツイート本文・メディア URL を `data.tweet` としてイベントに添える（`X_WEB_PUSH_TWEET_API` で差し替え/`none` で外部呼び出しを無効化）。補完失敗時や無効時は通知自体のフィールドから組み立てた `partial: true` の tweet を添え、raw payload は常にそのまま配信される。
+
 X Cookie (`auth_token`, `ct0`) はソース管理に入れない。systemd credentials 対応済みの fork を使い、Secret Manager → root 限定 `/run` → `LoadCredential` で渡すため、Cookie は `angelic-angel.toml` に保存しない。詳しい構成と監視専用 X アカウントの手順は [docs/x-web-push.md](docs/x-web-push.md) を参照。
 
 ## プロビジョニングとデプロイの自動化

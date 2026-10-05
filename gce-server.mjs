@@ -13,7 +13,7 @@ import {createDiscordRest} from './lib/adapters/discord-rest.mjs';
 import {validateDiscordIntegration,discordDiagnostic} from './lib/adapters/discord-preflight.mjs';
 import {createDiscordCallbackTransport} from './lib/events/callback-transport.mjs';
 import {createDiscordEyes} from './lib/adapters/discord-reaction.mjs';
-import {createXWebPushAdapter,readXWebPushConfig} from './lib/adapters/x-web-push.mjs';
+import {createTweetLookup,createXWebPushAdapter,readXWebPushConfig} from './lib/adapters/x-web-push.mjs';
 import {createTimingSink} from './lib/events/timing.mjs';
 
 // 準備はローカルのみ。このエントリポイントは VM、IAM、DNS、証明書、シークレットを
@@ -35,7 +35,8 @@ export async function prepareGceServer(env,dependencies={}){
   const xConfig=readXWebPushConfig(env);
   const xAuth=xConfig.enabled?(dependencies.xAuth??createOAuth({config:{...config,origin:origin.origin+'/x',resource:xResource,discordEnabled:false,xEnabled:true,consumerOnly:true,consumerCookiePrefix:'x',oauthStateKey:'oauth-state:x:v1',discordUnattendedEnabled:true},backend})):null;
   const auth=xAuth?routeSourceOAuth(discordAuth,{discord:discordAuth,x:xAuth}):discordAuth;
-  const extraAdapters=xConfig.enabled?[createXWebPushAdapter({sourceId:xConfig.sourceId})]:[];
+  const tweetLookup=xConfig.enabled&&xConfig.tweetApi?(dependencies.tweetLookup??createTweetLookup({api:xConfig.tweetApi})):null;
+  const extraAdapters=xConfig.enabled?[createXWebPushAdapter({sourceId:xConfig.sourceId,lookup:tweetLookup})]:[];
   const localIngestRoutes=xConfig.enabled?[{path:'/internal/x-web-push',source:'x'}]:[];
   const sourceResources=xConfig.enabled?{x:xResource}:{};
   const oauthStateKeys=xConfig.enabled?{[xResource]:'oauth-state:x:v1'}:{};
