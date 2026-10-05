@@ -50,6 +50,56 @@ test('statusRefFrom finds the first status URL inside bounded untrusted JSON',()
  const wide={};for(let i=0;i<80;i++)wide['k'+i]=i;wide.k79='https://x.com/o/status/1';assert.equal(statusRefFrom(wide),null);
 });
 
+test('statusRefFrom resolves relative status paths only in the notification data.uri field',()=>{
+ const uri='/ryoha_otaku/status/2107172170598318130';
+ assert.deepEqual(statusRefFrom({data:{uri}}),{user:'ryoha_otaku',id:'2107172170598318130',url:'https://x.com'+uri});
+ assert.deepEqual(statusRefFrom({data:{uri:'/i/web/status/123'}}),{id:'123',url:'https://x.com/i/web/status/123'});
+ assert.deepEqual(statusRefFrom({data:{uri:'/owner/statuses/456'}}),{user:'owner',id:'456',url:'https://x.com/owner/statuses/456'});
+ assert.deepEqual(statusRefFrom({data:{url:'https://twitter.com/first/status/7',uri}}),{user:'first',id:'7',url:'https://twitter.com/first/status/7'});
+ for(const raw of [uri,{uri},{body:uri},{data:{url:uri}},{metadata:{uri}},{metadata:{data:{uri}}},{data:[{uri}]}])assert.equal(statusRefFrom(raw),null);
+ const wide={uri};for(let i=0;i<64;i++)wide['k'+i]=i;assert.equal(statusRefFrom({data:wide}),null);
+});
+
+test('statusRefFrom rejects malformed and host-changing relative notification paths',()=>{
+ for(const uri of [
+  '//evil.example/owner/status/123','//x.com/owner/status/123','/\\evil.example/owner/status/123',
+  '/https://evil.example/owner/status/123','/owner/../other/status/123','/owner/%2e%2e/other/status/123',
+  '/%6fwner/status/123','/owner%2fother/status/123','/owner/status/123?redirect=https://evil.example',
+  '/owner/status/123#fragment','/owner/status/123/','/owner/status/123extra','/owner/status/-123',
+  '/owner/status/','/owner/status/'+'1'.repeat(26),'/'+'a'.repeat(21)+'/status/123',
+  '/owner/status/123\n',' /owner/status/123','/owner/status/123 ','/owner\\status\\123',
+  null,123,{uri:'/owner/status/123'}
+ ])assert.equal(statusRefFrom({data:{uri}}),null,String(uri));
+});
+
+test('a relative notification URI fetches photos and preserves them through callback and MCP read',async()=>{
+ const at=Date.now(),id='2107172170598318130',calls=[];
+ const raw={title:'@fixture',body:'sanitized notification',data:{uri:'/ryoha_otaku/status/'+id,tag:'tweet-'+id},icon:'https://pbs.twimg.com/profile_images/fixture.jpg'};
+ const photo={url:'https://pbs.twimg.com/media/fixture.jpg',width:640,height:480};
+ const lookup=createTweetLookup({fetchImpl:async(url)=>{
+  calls.push(url);
+  return {ok:true,headers:{get:()=>'512'},text:async()=>JSON.stringify({tweet:{id,url:'https://x.com/ryoha_otaku/status/'+id,media:{photos:[photo]}}})};
+ }});
+ const adapter=createXWebPushAdapter({sourceId:'@owner',now:()=>at,lookup});
+ const first=await adapter.normalize(raw),second=await adapter.normalize(raw);
+ assert.deepEqual(calls,Array(2).fill('https://api.fxtwitter.com/ryoha_otaku/status/'+id));
+ assert.deepEqual(first.data.payload,raw);
+ assert.equal(first.eventId,second.eventId);
+ assert.deepEqual(first.data.tweet.media.photos,[photo]);
+ assert.deepEqual(adapter.callbackData(first).tweet.media.photos,[photo]);
+ const store=createEventStore({backend:memory(),now:()=>at});
+ assert.equal((await store.ingest(owner,first)).duplicate,false);
+ assert.equal((await store.ingest(owner,second)).duplicate,true);
+ const principal={owner,clientId:'fake-client',grantId:'fake-grant',grantExpiresAt:at+3600000,resource:xResource,scopes:['x:read']};
+ const response=await createEventService({store,adapters:[adapter]}).handle('tools/call',{name:'x_read_event',arguments:{event_id:first.eventId}},principal);
+ const stored=JSON.parse(response.content[0].text);
+ assert.deepEqual(stored.data.payload,raw);
+ assert.deepEqual(stored.data.tweet.media.photos,[photo]);
+ const partial=await createXWebPushAdapter({sourceId:'@owner',now:()=>at,lookup:async()=>null}).normalize(raw);
+ assert.equal(partial.data.tweet.partial,true);
+ assert.equal(partial.data.tweet.id,id);
+});
+
 test('tweetFromPush assembles a partial tweet from fields the notification already carries',()=>{
  const ref={id:'42',url:'https://x.com/i/web/status/42'};
  const tweet=tweetFromPush({title:'@owner',body:'hello',icon:'https://pbs.twimg.com/profile_images/x.jpg',timestamp:1791221317000,image:'https://pbs.twimg.com/media/y.jpg',data:{lang:'ja',uri:'https://x.com/i/web/status/42'}},ref);
